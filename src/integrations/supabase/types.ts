@@ -14,7 +14,158 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      clientes: {
+        Row: {
+          ativo: boolean
+          created_at: string
+          documento: string | null
+          email: string | null
+          id: string
+          nome: string
+          observacoes: string | null
+          telefone: string
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          created_at?: string
+          documento?: string | null
+          email?: string | null
+          id?: string
+          nome: string
+          observacoes?: string | null
+          telefone: string
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          created_at?: string
+          documento?: string | null
+          email?: string | null
+          id?: string
+          nome?: string
+          observacoes?: string | null
+          telefone?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      cobrancas: {
+        Row: {
+          cliente_id: string
+          created_at: string
+          data_pagamento: string | null
+          descricao: string
+          id: string
+          observacoes: string | null
+          status: Database["public"]["Enums"]["cobranca_status"]
+          updated_at: string
+          valor: number
+          vencimento: string
+        }
+        Insert: {
+          cliente_id: string
+          created_at?: string
+          data_pagamento?: string | null
+          descricao: string
+          id?: string
+          observacoes?: string | null
+          status?: Database["public"]["Enums"]["cobranca_status"]
+          updated_at?: string
+          valor: number
+          vencimento: string
+        }
+        Update: {
+          cliente_id?: string
+          created_at?: string
+          data_pagamento?: string | null
+          descricao?: string
+          id?: string
+          observacoes?: string | null
+          status?: Database["public"]["Enums"]["cobranca_status"]
+          updated_at?: string
+          valor?: number
+          vencimento?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cobrancas_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      configuracoes: {
+        Row: {
+          key: string
+          updated_at: string
+          value: string | null
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value?: string | null
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: string | null
+        }
+        Relationships: []
+      }
+      movimentacoes: {
+        Row: {
+          categoria: string | null
+          cliente_id: string | null
+          cobranca_id: string | null
+          created_at: string
+          data: string
+          descricao: string
+          id: string
+          tipo: Database["public"]["Enums"]["movimentacao_tipo"]
+          valor: number
+        }
+        Insert: {
+          categoria?: string | null
+          cliente_id?: string | null
+          cobranca_id?: string | null
+          created_at?: string
+          data?: string
+          descricao: string
+          id?: string
+          tipo: Database["public"]["Enums"]["movimentacao_tipo"]
+          valor: number
+        }
+        Update: {
+          categoria?: string | null
+          cliente_id?: string | null
+          cobranca_id?: string | null
+          created_at?: string
+          data?: string
+          descricao?: string
+          id?: string
+          tipo?: Database["public"]["Enums"]["movimentacao_tipo"]
+          valor?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "movimentacoes_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "movimentacoes_cobranca_id_fkey"
+            columns: ["cobranca_id"]
+            isOneToOne: false
+            referencedRelation: "cobrancas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +174,8 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      cobranca_status: "pendente" | "pago" | "atrasado" | "cancelado"
+      movimentacao_tipo: "entrada" | "saida"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +302,9 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      cobranca_status: ["pendente", "pago", "atrasado", "cancelado"],
+      movimentacao_tipo: ["entrada", "saida"],
+    },
   },
 } as const
