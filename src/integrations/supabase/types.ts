@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      categorias: {
+        Row: {
+          created_at: string
+          id: string
+          nome: string
+          tipo: Database["public"]["Enums"]["movimentacao_tipo"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          nome: string
+          tipo: Database["public"]["Enums"]["movimentacao_tipo"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          nome?: string
+          tipo?: Database["public"]["Enums"]["movimentacao_tipo"]
+          user_id?: string
+        }
+        Relationships: []
+      }
       clientes: {
         Row: {
           ativo: boolean
@@ -25,6 +49,7 @@ export type Database = {
           observacoes: string | null
           telefone: string
           updated_at: string
+          user_id: string
         }
         Insert: {
           ativo?: boolean
@@ -36,6 +61,7 @@ export type Database = {
           observacoes?: string | null
           telefone: string
           updated_at?: string
+          user_id: string
         }
         Update: {
           ativo?: boolean
@@ -47,6 +73,7 @@ export type Database = {
           observacoes?: string | null
           telefone?: string
           updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -60,6 +87,7 @@ export type Database = {
           observacoes: string | null
           status: Database["public"]["Enums"]["cobranca_status"]
           updated_at: string
+          user_id: string
           valor: number
           vencimento: string
         }
@@ -72,6 +100,7 @@ export type Database = {
           observacoes?: string | null
           status?: Database["public"]["Enums"]["cobranca_status"]
           updated_at?: string
+          user_id: string
           valor: number
           vencimento: string
         }
@@ -84,6 +113,7 @@ export type Database = {
           observacoes?: string | null
           status?: Database["public"]["Enums"]["cobranca_status"]
           updated_at?: string
+          user_id?: string
           valor?: number
           vencimento?: string
         }
@@ -101,16 +131,19 @@ export type Database = {
         Row: {
           key: string
           updated_at: string
+          user_id: string
           value: string | null
         }
         Insert: {
           key: string
           updated_at?: string
+          user_id: string
           value?: string | null
         }
         Update: {
           key?: string
           updated_at?: string
+          user_id?: string
           value?: string | null
         }
         Relationships: []
@@ -125,6 +158,7 @@ export type Database = {
           descricao: string
           id: string
           tipo: Database["public"]["Enums"]["movimentacao_tipo"]
+          user_id: string
           valor: number
         }
         Insert: {
@@ -136,6 +170,7 @@ export type Database = {
           descricao: string
           id?: string
           tipo: Database["public"]["Enums"]["movimentacao_tipo"]
+          user_id: string
           valor: number
         }
         Update: {
@@ -147,6 +182,7 @@ export type Database = {
           descricao?: string
           id?: string
           tipo?: Database["public"]["Enums"]["movimentacao_tipo"]
+          user_id?: string
           valor?: number
         }
         Relationships: [
@@ -165,6 +201,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          empresa: string | null
+          id: string
+          nome: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          empresa?: string | null
+          id: string
+          nome?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          empresa?: string | null
+          id?: string
+          nome?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
     }
     Views: {
