@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { brl, fmtDate, effectiveStatus, todayISO } from "@/lib/format";
 import { waLink, renderTemplate } from "@/lib/whatsapp";
 
-export const Route = createFileRoute("/cobrancas")({
+export const Route = createFileRoute("/_authenticated/cobrancas")({
   head: () => ({ meta: [{ title: "Cobranças — CobraZap" }, { name: "description", content: "Cadastro e gestão de cobranças." }] }),
   component: CobrancasPage,
 });

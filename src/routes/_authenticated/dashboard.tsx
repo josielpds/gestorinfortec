@@ -7,7 +7,7 @@ import { Users, DollarSign, AlertTriangle, CheckCircle2, Clock, TrendingUp, Mess
 import { brl, fmtDate, todayISO, effectiveStatus } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
     meta: [
       { title: "Dashboard — CobraZap" },

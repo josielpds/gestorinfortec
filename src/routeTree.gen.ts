@@ -9,159 +9,160 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as RelatoriosRouteImport } from './routes/relatorios'
-import { Route as MensagensRouteImport } from './routes/mensagens'
-import { Route as ConfiguracoesRouteImport } from './routes/configuracoes'
-import { Route as CobrancasRouteImport } from './routes/cobrancas'
-import { Route as ClientesRouteImport } from './routes/clientes'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authenticated/relatorios'
+import { Route as AuthenticatedMensagensRouteImport } from './routes/_authenticated/mensagens'
+import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as AuthenticatedConfiguracoesRouteImport } from './routes/_authenticated/configuracoes'
+import { Route as AuthenticatedCobrancasRouteImport } from './routes/_authenticated/cobrancas'
+import { Route as AuthenticatedClientesRouteImport } from './routes/_authenticated/clientes'
 
-const RelatoriosRoute = RelatoriosRouteImport.update({
-  id: '/relatorios',
+const AuthenticatedRelatoriosRoute = AuthenticatedRelatoriosRouteImport.update({
+  id: '/_authenticated/relatorios',
   path: '/relatorios',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MensagensRoute = MensagensRouteImport.update({
-  id: '/mensagens',
+const AuthenticatedMensagensRoute = AuthenticatedMensagensRouteImport.update({
+  id: '/_authenticated/mensagens',
   path: '/mensagens',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ConfiguracoesRoute = ConfiguracoesRouteImport.update({
-  id: '/configuracoes',
-  path: '/configuracoes',
+const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
+  id: '/_authenticated/dashboard',
+  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CobrancasRoute = CobrancasRouteImport.update({
-  id: '/cobrancas',
+const AuthenticatedConfiguracoesRoute =
+  AuthenticatedConfiguracoesRouteImport.update({
+    id: '/_authenticated/configuracoes',
+    path: '/configuracoes',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const AuthenticatedCobrancasRoute = AuthenticatedCobrancasRouteImport.update({
+  id: '/_authenticated/cobrancas',
   path: '/cobrancas',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ClientesRoute = ClientesRouteImport.update({
-  id: '/clientes',
+const AuthenticatedClientesRoute = AuthenticatedClientesRouteImport.update({
+  id: '/_authenticated/clientes',
   path: '/clientes',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/clientes': typeof ClientesRoute
-  '/cobrancas': typeof CobrancasRoute
-  '/configuracoes': typeof ConfiguracoesRoute
-  '/mensagens': typeof MensagensRoute
-  '/relatorios': typeof RelatoriosRoute
+  '/clientes': typeof AuthenticatedClientesRoute
+  '/cobrancas': typeof AuthenticatedCobrancasRoute
+  '/configuracoes': typeof AuthenticatedConfiguracoesRoute
+  '/dashboard': typeof AuthenticatedDashboardRoute
+  '/mensagens': typeof AuthenticatedMensagensRoute
+  '/relatorios': typeof AuthenticatedRelatoriosRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/clientes': typeof ClientesRoute
-  '/cobrancas': typeof CobrancasRoute
-  '/configuracoes': typeof ConfiguracoesRoute
-  '/mensagens': typeof MensagensRoute
-  '/relatorios': typeof RelatoriosRoute
+  '/clientes': typeof AuthenticatedClientesRoute
+  '/cobrancas': typeof AuthenticatedCobrancasRoute
+  '/configuracoes': typeof AuthenticatedConfiguracoesRoute
+  '/dashboard': typeof AuthenticatedDashboardRoute
+  '/mensagens': typeof AuthenticatedMensagensRoute
+  '/relatorios': typeof AuthenticatedRelatoriosRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/clientes': typeof ClientesRoute
-  '/cobrancas': typeof CobrancasRoute
-  '/configuracoes': typeof ConfiguracoesRoute
-  '/mensagens': typeof MensagensRoute
-  '/relatorios': typeof RelatoriosRoute
+  '/_authenticated/clientes': typeof AuthenticatedClientesRoute
+  '/_authenticated/cobrancas': typeof AuthenticatedCobrancasRoute
+  '/_authenticated/configuracoes': typeof AuthenticatedConfiguracoesRoute
+  '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/mensagens': typeof AuthenticatedMensagensRoute
+  '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
     | '/clientes'
     | '/cobrancas'
     | '/configuracoes'
+    | '/dashboard'
     | '/mensagens'
     | '/relatorios'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
     | '/clientes'
     | '/cobrancas'
     | '/configuracoes'
+    | '/dashboard'
     | '/mensagens'
     | '/relatorios'
   id:
     | '__root__'
-    | '/'
-    | '/clientes'
-    | '/cobrancas'
-    | '/configuracoes'
-    | '/mensagens'
-    | '/relatorios'
+    | '/_authenticated/clientes'
+    | '/_authenticated/cobrancas'
+    | '/_authenticated/configuracoes'
+    | '/_authenticated/dashboard'
+    | '/_authenticated/mensagens'
+    | '/_authenticated/relatorios'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  ClientesRoute: typeof ClientesRoute
-  CobrancasRoute: typeof CobrancasRoute
-  ConfiguracoesRoute: typeof ConfiguracoesRoute
-  MensagensRoute: typeof MensagensRoute
-  RelatoriosRoute: typeof RelatoriosRoute
+  AuthenticatedClientesRoute: typeof AuthenticatedClientesRoute
+  AuthenticatedCobrancasRoute: typeof AuthenticatedCobrancasRoute
+  AuthenticatedConfiguracoesRoute: typeof AuthenticatedConfiguracoesRoute
+  AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedMensagensRoute: typeof AuthenticatedMensagensRoute
+  AuthenticatedRelatoriosRoute: typeof AuthenticatedRelatoriosRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/relatorios': {
-      id: '/relatorios'
+    '/_authenticated/relatorios': {
+      id: '/_authenticated/relatorios'
       path: '/relatorios'
       fullPath: '/relatorios'
-      preLoaderRoute: typeof RelatoriosRouteImport
+      preLoaderRoute: typeof AuthenticatedRelatoriosRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/mensagens': {
-      id: '/mensagens'
+    '/_authenticated/mensagens': {
+      id: '/_authenticated/mensagens'
       path: '/mensagens'
       fullPath: '/mensagens'
-      preLoaderRoute: typeof MensagensRouteImport
+      preLoaderRoute: typeof AuthenticatedMensagensRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/configuracoes': {
-      id: '/configuracoes'
+    '/_authenticated/dashboard': {
+      id: '/_authenticated/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/configuracoes': {
+      id: '/_authenticated/configuracoes'
       path: '/configuracoes'
       fullPath: '/configuracoes'
-      preLoaderRoute: typeof ConfiguracoesRouteImport
+      preLoaderRoute: typeof AuthenticatedConfiguracoesRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/cobrancas': {
-      id: '/cobrancas'
+    '/_authenticated/cobrancas': {
+      id: '/_authenticated/cobrancas'
       path: '/cobrancas'
       fullPath: '/cobrancas'
-      preLoaderRoute: typeof CobrancasRouteImport
+      preLoaderRoute: typeof AuthenticatedCobrancasRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/clientes': {
-      id: '/clientes'
+    '/_authenticated/clientes': {
+      id: '/_authenticated/clientes'
       path: '/clientes'
       fullPath: '/clientes'
-      preLoaderRoute: typeof ClientesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+      preLoaderRoute: typeof AuthenticatedClientesRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  ClientesRoute: ClientesRoute,
-  CobrancasRoute: CobrancasRoute,
-  ConfiguracoesRoute: ConfiguracoesRoute,
-  MensagensRoute: MensagensRoute,
-  RelatoriosRoute: RelatoriosRoute,
+  AuthenticatedClientesRoute: AuthenticatedClientesRoute,
+  AuthenticatedCobrancasRoute: AuthenticatedCobrancasRoute,
+  AuthenticatedConfiguracoesRoute: AuthenticatedConfiguracoesRoute,
+  AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedMensagensRoute: AuthenticatedMensagensRoute,
+  AuthenticatedRelatoriosRoute: AuthenticatedRelatoriosRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
