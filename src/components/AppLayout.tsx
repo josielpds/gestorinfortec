@@ -1,12 +1,18 @@
-import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Users, Receipt, MessageCircle, BarChart3, Settings, Zap } from "lucide-react";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { LayoutDashboard, Users, Receipt, MessageCircle, BarChart3, Settings, Zap, Wallet, Tags, LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useQueryClient } from "@tanstack/react-query";
+import { Button } from "@/components/ui/button";
 
 const nav = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/clientes", label: "Clientes", icon: Users },
   { to: "/cobrancas", label: "Cobranças", icon: Receipt },
+  { to: "/movimentacoes", label: "Movimentações", icon: Wallet },
+  { to: "/categorias", label: "Categorias", icon: Tags },
   { to: "/mensagens", label: "Disparar Mensagens", icon: MessageCircle },
   { to: "/relatorios", label: "Relatórios", icon: BarChart3 },
   { to: "/configuracoes", label: "Configurações", icon: Settings },
@@ -14,6 +20,16 @@ const nav = [
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { data: user } = useCurrentUser();
+
+  const signOut = async () => {
+    await qc.cancelQueries();
+    qc.clear();
+    await supabase.auth.signOut();
+    navigate({ to: "/auth", replace: true });
+  };
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -27,9 +43,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
             <div className="text-xs opacity-70 leading-tight">Cobranças via WhatsApp</div>
           </div>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {nav.map((n) => {
-            const active = n.exact ? pathname === n.to : pathname.startsWith(n.to);
+            const active = pathname === n.to || pathname.startsWith(n.to + "/");
             const Icon = n.icon;
             return (
               <Link
@@ -48,8 +64,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
             );
           })}
         </nav>
-        <div className="px-5 py-3 text-xs opacity-60 border-t border-sidebar-border">
-          v1.0.0 · CobraZap
+        <div className="px-3 py-3 border-t border-sidebar-border space-y-2">
+          {user && (
+            <div className="px-2 text-xs opacity-70 truncate" title={user.email ?? undefined}>
+              {user.email}
+            </div>
+          )}
+          <Button variant="ghost" size="sm" className="w-full justify-start hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" onClick={signOut}>
+            <LogOut className="h-4 w-4 mr-2" /> Sair
+          </Button>
         </div>
       </aside>
       <main className="flex-1 overflow-x-hidden">{children}</main>
