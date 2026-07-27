@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { currentUserId } from "@/hooks/useCurrentUser";
 import { AppLayout, PageHeader } from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -53,7 +54,11 @@ function CobrancasPage() {
   });
 
   const create = useMutation({
-    mutationFn: async (p: any) => { const { error } = await supabase.from("cobrancas").insert(p); if (error) throw error; },
+    mutationFn: async (p: any) => {
+      const user_id = await currentUserId();
+      const { error } = await supabase.from("cobrancas").insert({ ...p, user_id });
+      if (error) throw error;
+    },
     onSuccess: () => { toast.success("Cobrança criada"); qc.invalidateQueries(); setOpen(false); },
     onError: (e: any) => toast.error(e.message),
   });

@@ -9,30 +9,58 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+import { currentUserId } from "@/hooks/useCurrentUser";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
-  head: () => ({ meta: [{ title: "Configurações — CobraZap" }, { name: "description", content: "Configure templates de mensagens e dados da empresa." }] }),
+  head: () => ({ meta: [
+    { title: "Configurações — CobraZap" },
+    { name: "description", content: "Configure seu perfil, templates de mensagem e dados da empresa." },
+  ] }),
   component: ConfigPage,
 });
 
 function ConfigPage() {
   const qc = useQueryClient();
+
   const { data: rows = [] } = useQuery({
     queryKey: ["cfg-all-page"],
     queryFn: async () => (await supabase.from("configuracoes").select("*")).data ?? [],
   });
 
+  const { data: profile } = useQuery({
+    queryKey: ["profile"],
+    queryFn: async () => (await supabase.from("profiles").select("*").maybeSingle()).data,
+  });
+
   const [form, setForm] = useState<Record<string, string>>({});
+  const [nome, setNome] = useState("");
+  const [empresa, setEmpresa] = useState("");
+
   useEffect(() => {
     const m: Record<string, string> = {};
     rows.forEach((r: any) => { m[r.key] = r.value ?? ""; });
     setForm(m);
   }, [rows]);
 
+  useEffect(() => {
+    if (profile) { setNome(profile.nome ?? ""); setEmpresa(profile.empresa ?? ""); }
+  }, [profile]);
+
+  const saveProfile = useMutation({
+    mutationFn: async () => {
+      const user_id = await currentUserId();
+      const { error } = await supabase.from("profiles").upsert({ id: user_id, nome, empresa });
+      if (error) throw error;
+    },
+    onSuccess: () => { toast.success("Perfil salvo"); qc.invalidateQueries({ queryKey: ["profile"] }); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const save = useMutation({
     mutationFn: async () => {
-      const upserts = Object.entries(form).map(([key, value]) => ({ key, value, updated_at: new Date().toISOString() }));
-      const { error } = await supabase.from("configuracoes").upsert(upserts, { onConflict: "key" });
+      const user_id = await currentUserId();
+      const upserts = Object.entries(form).map(([key, value]) => ({ user_id, key, value }));
+      const { error } = await supabase.from("configuracoes").upsert(upserts, { onConflict: "user_id,key" });
       if (error) throw error;
     },
     onSuccess: () => { toast.success("Configurações salvas"); qc.invalidateQueries(); },
@@ -44,11 +72,22 @@ function ConfigPage() {
   return (
     <AppLayout>
       <div className="p-8 max-w-3xl">
-        <PageHeader title="Configurações" subtitle="Personalize templates de mensagens e dados da empresa" />
+        <PageHeader title="Configurações" subtitle="Personalize seu perfil, empresa e templates de mensagem" />
 
         <div className="space-y-6">
           <Card>
-            <CardHeader><CardTitle>Empresa</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Seu perfil</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div><Label>Nome</Label><Input value={nome} onChange={(e) => setNome(e.target.value)} maxLength={100} /></div>
+              <div><Label>Empresa</Label><Input value={empresa} onChange={(e) => setEmpresa(e.target.value)} maxLength={100} /></div>
+              <Button size="sm" onClick={() => saveProfile.mutate()} disabled={saveProfile.isPending}>
+                {saveProfile.isPending ? "Salvando..." : "Salvar perfil"}
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Empresa (aparece nas mensagens)</CardTitle></CardHeader>
             <CardContent>
               <Label>Nome da empresa</Label>
               <Input value={form.nome_empresa ?? ""} onChange={(e) => set("nome_empresa", e.target.value)} />

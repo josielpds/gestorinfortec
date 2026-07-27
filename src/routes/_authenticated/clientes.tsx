@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { currentUserId } from "@/hooks/useCurrentUser";
 import { AppLayout, PageHeader } from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -44,7 +45,8 @@ function ClientesPage() {
         const { error } = await supabase.from("clientes").update(payload).eq("id", editing.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from("clientes").insert(payload as any);
+        const user_id = await currentUserId();
+        const { error } = await supabase.from("clientes").insert({ ...(payload as any), user_id });
         if (error) throw error;
       }
     },
