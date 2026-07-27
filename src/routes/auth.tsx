@@ -107,7 +107,7 @@ function SignupForm() {
     const parsed = signupSchema.safeParse(form);
     if (!parsed.success) { toast.error(parsed.error.issues[0].message); return; }
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: parsed.data.email,
       password: parsed.data.password,
       options: {
@@ -117,6 +117,10 @@ function SignupForm() {
     });
     setLoading(false);
     if (error) { toast.error(error.message); return; }
+    if (!data.session) {
+      toast.success("Conta criada! Verifique seu email para confirmar.");
+      return;
+    }
     toast.success("Conta criada! Você já está logado.");
     navigate({ to: "/dashboard", replace: true });
   };
