@@ -12,7 +12,7 @@ import { Send, MessageCircle, AlertTriangle, Clock } from "lucide-react";
 import { brl, fmtDate, effectiveStatus, todayISO } from "@/lib/format";
 import { waLink, renderTemplate } from "@/lib/whatsapp";
 
-export const Route = createFileRoute("/mensagens")({
+export const Route = createFileRoute("/_authenticated/mensagens")({
   head: () => ({ meta: [{ title: "Disparar Mensagens — CobraZap" }, { name: "description", content: "Envie cobranças e lembretes via WhatsApp." }] }),
   component: MensagensPage,
 });

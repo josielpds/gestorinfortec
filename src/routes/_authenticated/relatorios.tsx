@@ -13,7 +13,7 @@ import { Download, TrendingUp, TrendingDown, Users, AlertCircle } from "lucide-r
 import { brl, fmtDate, effectiveStatus, todayISO, daysBetween } from "@/lib/format";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from "recharts";
 
-export const Route = createFileRoute("/relatorios")({
+export const Route = createFileRoute("/_authenticated/relatorios")({
   head: () => ({ meta: [
     { title: "Relatórios — CobraZap" },
     { name: "description", content: "Relatórios de faturamento, movimentações financeiras, cadastros e inadimplência." },
