@@ -12,7 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Check, Send } from "lucide-react";
+import { Plus, Trash2, Check, Send, Repeat } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { brl, fmtDate, effectiveStatus, todayISO } from "@/lib/format";
 import { waLink, renderTemplate } from "@/lib/whatsapp";
@@ -25,7 +26,14 @@ export const Route = createFileRoute("/_authenticated/cobrancas")({
 type Cobranca = {
   id: string; cliente_id: string; descricao: string; valor: number;
   vencimento: string; status: string; data_pagamento: string | null;
+  recorrente?: boolean; frequencia?: string | null; categoria_id?: string | null;
   clientes?: { nome: string; telefone: string };
+  categorias?: { nome: string } | null;
+};
+
+const FREQ_LABEL: Record<string, string> = {
+  semanal: "Semanal", quinzenal: "Quinzenal", mensal: "Mensal", bimestral: "Bimestral",
+  trimestral: "Trimestral", semestral: "Semestral", anual: "Anual",
 };
 
 function CobrancasPage() {
@@ -37,7 +45,7 @@ function CobrancasPage() {
     queryKey: ["cobrancas"],
     queryFn: async () => {
       const { data, error } = await supabase.from("cobrancas")
-        .select("*, clientes(nome, telefone)").order("vencimento");
+        .select("*, clientes(nome, telefone), categorias(nome)").order("vencimento");
       if (error) throw error;
       return data as unknown as Cobranca[];
     },
@@ -47,6 +55,12 @@ function CobrancasPage() {
     queryKey: ["clientes-list"],
     queryFn: async () => (await supabase.from("clientes").select("id, nome, telefone").eq("ativo", true).order("nome")).data ?? [],
   });
+
+  const { data: categorias = [] } = useQuery({
+    queryKey: ["categorias-entrada"],
+    queryFn: async () => (await supabase.from("categorias").select("id, nome").eq("tipo", "entrada").order("nome")).data ?? [],
+  });
+
 
   const { data: tplRow } = useQuery({
     queryKey: ["cfg", "template_cobranca"],
@@ -79,6 +93,7 @@ function CobrancasPage() {
 
   const filtered = cobrancas.filter((c) => {
     if (filter === "todos") return true;
+    if (filter === "recorrente") return !!c.recorrente;
     return effectiveStatus(c.vencimento, c.status) === filter;
   });
 
@@ -91,18 +106,19 @@ function CobrancasPage() {
           action={
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild><Button disabled={clientes.length === 0}><Plus className="h-4 w-4 mr-2" /> Nova Cobrança</Button></DialogTrigger>
-              <CobrancaForm clientes={clientes as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
+              <CobrancaForm clientes={clientes as any} categorias={categorias as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
             </Dialog>
           }
         />
 
-        <div className="flex gap-2 mb-4">
-          {["todos", "pendente", "atrasado", "pago", "cancelado"].map((s) => (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {["todos", "pendente", "atrasado", "pago", "cancelado", "recorrente"].map((s) => (
             <Button key={s} variant={filter === s ? "default" : "outline"} size="sm" onClick={() => setFilter(s)}>
-              {s === "todos" ? "Todas" : s.charAt(0).toUpperCase() + s.slice(1)}
+              {s === "todos" ? "Todas" : s === "recorrente" ? "Mensalidades" : s.charAt(0).toUpperCase() + s.slice(1)}
             </Button>
           ))}
         </div>
+
 
         <Card>
           <CardContent className="p-0">
@@ -116,6 +132,7 @@ function CobrancasPage() {
                   <tr>
                     <th className="text-left px-4 py-3">Cliente</th>
                     <th className="text-left px-4 py-3">Descrição</th>
+                    <th className="text-left px-4 py-3">Categoria</th>
                     <th className="text-right px-4 py-3">Valor</th>
                     <th className="text-left px-4 py-3">Vencimento</th>
                     <th className="text-left px-4 py-3">Status</th>
@@ -128,10 +145,21 @@ function CobrancasPage() {
                     return (
                       <tr key={c.id} className="hover:bg-muted/30">
                         <td className="px-4 py-3 font-medium">{c.clientes?.nome ?? "—"}</td>
-                        <td className="px-4 py-3">{c.descricao}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {c.descricao}
+                            {c.recorrente && (
+                              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 gap-1">
+                                <Repeat className="h-3 w-3" /> {FREQ_LABEL[c.frequencia ?? ""] ?? "Recorrente"}
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{c.categorias?.nome ?? "—"}</td>
                         <td className="px-4 py-3 text-right font-semibold">{brl(c.valor)}</td>
                         <td className="px-4 py-3">{fmtDate(c.vencimento)}</td>
                         <td className="px-4 py-3"><StatusBadge status={st} /></td>
+
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           {c.status !== "pago" && (
                             <>
@@ -174,8 +202,11 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="outline" className={it.c}>{it.l}</Badge>;
 }
 
-function CobrancaForm({ clientes, onSubmit, loading }: { clientes: any[]; onSubmit: (p: any) => void; loading: boolean }) {
-  const [form, setForm] = useState({ cliente_id: "", descricao: "", valor: "", vencimento: todayISO(), observacoes: "" });
+function CobrancaForm({ clientes, categorias, onSubmit, loading }: { clientes: any[]; categorias: any[]; onSubmit: (p: any) => void; loading: boolean }) {
+  const [form, setForm] = useState({
+    cliente_id: "", descricao: "", valor: "", vencimento: todayISO(), observacoes: "",
+    categoria_id: "", recorrente: false, frequencia: "mensal", recorrencia_fim: "",
+  });
   return (
     <DialogContent>
       <DialogHeader><DialogTitle>Nova Cobrança</DialogTitle></DialogHeader>
@@ -190,18 +221,69 @@ function CobrancaForm({ clientes, onSubmit, loading }: { clientes: any[]; onSubm
           </Select>
         </div>
         <div><Label>Descrição *</Label><Input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} /></div>
+        <div>
+          <Label>Categoria de faturamento</Label>
+          <Select value={form.categoria_id} onValueChange={(v) => setForm({ ...form, categoria_id: v })}>
+            <SelectTrigger><SelectValue placeholder="Selecione a fonte de renda" /></SelectTrigger>
+            <SelectContent>
+              {categorias.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {categorias.length === 0 && (
+            <p className="text-xs text-muted-foreground mt-1">Crie categorias de entrada na página Categorias.</p>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <div><Label>Valor (R$) *</Label><Input type="number" step="0.01" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} /></div>
           <div><Label>Vencimento *</Label><Input type="date" value={form.vencimento} onChange={(e) => setForm({ ...form, vencimento: e.target.value })} /></div>
         </div>
+
+        <div className="rounded-lg border p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="flex items-center gap-2"><Repeat className="h-4 w-4 text-primary" /> Mensalidade / recorrência</Label>
+              <p className="text-xs text-muted-foreground mt-1">Ao marcar como paga, a próxima cobrança é criada automaticamente.</p>
+            </div>
+            <Switch checked={form.recorrente} onCheckedChange={(v) => setForm({ ...form, recorrente: v })} />
+          </div>
+          {form.recorrente && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Frequência</Label>
+                <Select value={form.frequencia} onValueChange={(v) => setForm({ ...form, frequencia: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(FREQ_LABEL).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Repetir até (opcional)</Label>
+                <Input type="date" value={form.recorrencia_fim} onChange={(e) => setForm({ ...form, recorrencia_fim: e.target.value })} />
+              </div>
+            </div>
+          )}
+        </div>
+
         <div><Label>Observações</Label><Textarea value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} rows={2} /></div>
       </div>
       <DialogFooter>
         <Button disabled={loading || !form.cliente_id || !form.descricao || !form.valor}
-          onClick={() => onSubmit({ ...form, valor: parseFloat(form.valor) })}>
+          onClick={() => onSubmit({
+            cliente_id: form.cliente_id,
+            descricao: form.descricao,
+            observacoes: form.observacoes,
+            vencimento: form.vencimento,
+            valor: parseFloat(form.valor),
+            categoria_id: form.categoria_id || null,
+            recorrente: form.recorrente,
+            frequencia: form.recorrente ? form.frequencia : null,
+            recorrencia_fim: form.recorrente && form.recorrencia_fim ? form.recorrencia_fim : null,
+          })}>
           {loading ? "Salvando..." : "Criar cobrança"}
         </Button>
       </DialogFooter>
     </DialogContent>
   );
 }
+

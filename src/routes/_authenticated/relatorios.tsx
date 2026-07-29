@@ -81,8 +81,9 @@ function exportCSV(filename: string, rows: any[], headers: { key: string; label:
 function Faturamento({ from, to }: { from: string; to: string }) {
   const { data = [] } = useQuery({
     queryKey: ["rel-fat", from, to],
-    queryFn: async () => ((await supabase.from("cobrancas").select("*, clientes(nome)")
+    queryFn: async () => ((await supabase.from("cobrancas").select("*, clientes(nome), categorias(nome)")
       .gte("vencimento", from).lte("vencimento", to)).data ?? []) as any[],
+
   });
 
   const stats = useMemo(() => {
@@ -103,6 +104,19 @@ function Faturamento({ from, to }: { from: string; to: string }) {
     });
     return Object.values(map).sort((a, b) => a.mes.localeCompare(b.mes));
   }, [data]);
+
+  const byCategoria = useMemo(() => {
+    const map: Record<string, { categoria: string; total: number; recebido: number; qtd: number }> = {};
+    data.forEach((c) => {
+      const nome = c.categorias?.nome ?? "Sem categoria";
+      map[nome] = map[nome] ?? { categoria: nome, total: 0, recebido: 0, qtd: 0 };
+      map[nome].total += Number(c.valor);
+      map[nome].qtd += 1;
+      if (c.status === "pago") map[nome].recebido += Number(c.valor);
+    });
+    return Object.values(map).sort((a, b) => b.total - a.total);
+  }, [data]);
+
 
   return (
     <div className="mt-4 space-y-4">
@@ -131,6 +145,43 @@ function Faturamento({ from, to }: { from: string; to: string }) {
       </Card>
 
       <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Faturamento por fonte de renda</CardTitle>
+          <Button variant="outline" size="sm" onClick={() => exportCSV("faturamento-categorias.csv", byCategoria, [
+            { key: "categoria", label: "Categoria" }, { key: "qtd", label: "Cobranças" },
+            { key: "total", label: "Total" }, { key: "recebido", label: "Recebido" },
+          ])}><Download className="h-4 w-4 mr-2" /> Exportar CSV</Button>
+        </CardHeader>
+        <CardContent className="p-0">
+          {byCategoria.length === 0 ? (
+            <div className="py-10 text-center text-muted-foreground text-sm">Nenhuma cobrança no período</div>
+          ) : (
+            <table className="w-full">
+              <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="text-left px-4 py-3">Categoria</th>
+                  <th className="text-right px-4 py-3">Cobranças</th>
+                  <th className="text-right px-4 py-3">Total</th>
+                  <th className="text-right px-4 py-3">Recebido</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {byCategoria.map((c) => (
+                  <tr key={c.categoria} className="hover:bg-muted/30">
+                    <td className="px-4 py-3 font-medium">{c.categoria}</td>
+                    <td className="px-4 py-3 text-right">{c.qtd}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{brl(c.total)}</td>
+                    <td className="px-4 py-3 text-right text-success">{brl(c.recebido)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Detalhamento ({stats.qtd})</CardTitle>
           <Button variant="outline" size="sm" onClick={() => exportCSV("faturamento.csv", data.map((c: any) => ({
