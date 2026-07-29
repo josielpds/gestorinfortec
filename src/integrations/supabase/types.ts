@@ -79,12 +79,17 @@ export type Database = {
       }
       cobrancas: {
         Row: {
+          categoria_id: string | null
           cliente_id: string
           created_at: string
           data_pagamento: string | null
           descricao: string
+          frequencia: Database["public"]["Enums"]["recorrencia_freq"] | null
           id: string
           observacoes: string | null
+          origem_id: string | null
+          recorrencia_fim: string | null
+          recorrente: boolean
           status: Database["public"]["Enums"]["cobranca_status"]
           updated_at: string
           user_id: string
@@ -92,12 +97,17 @@ export type Database = {
           vencimento: string
         }
         Insert: {
+          categoria_id?: string | null
           cliente_id: string
           created_at?: string
           data_pagamento?: string | null
           descricao: string
+          frequencia?: Database["public"]["Enums"]["recorrencia_freq"] | null
           id?: string
           observacoes?: string | null
+          origem_id?: string | null
+          recorrencia_fim?: string | null
+          recorrente?: boolean
           status?: Database["public"]["Enums"]["cobranca_status"]
           updated_at?: string
           user_id: string
@@ -105,12 +115,17 @@ export type Database = {
           vencimento: string
         }
         Update: {
+          categoria_id?: string | null
           cliente_id?: string
           created_at?: string
           data_pagamento?: string | null
           descricao?: string
+          frequencia?: Database["public"]["Enums"]["recorrencia_freq"] | null
           id?: string
           observacoes?: string | null
+          origem_id?: string | null
+          recorrencia_fim?: string | null
+          recorrente?: boolean
           status?: Database["public"]["Enums"]["cobranca_status"]
           updated_at?: string
           user_id?: string
@@ -119,10 +134,24 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "cobrancas_categoria_id_fkey"
+            columns: ["categoria_id"]
+            isOneToOne: false
+            referencedRelation: "categorias"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "cobrancas_cliente_id_fkey"
             columns: ["cliente_id"]
             isOneToOne: false
             referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cobrancas_origem_id_fkey"
+            columns: ["origem_id"]
+            isOneToOne: false
+            referencedRelation: "cobrancas"
             referencedColumns: ["id"]
           },
         ]
@@ -231,11 +260,22 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      proximo_vencimento: {
+        Args: { d: string; f: Database["public"]["Enums"]["recorrencia_freq"] }
+        Returns: string
+      }
     }
     Enums: {
       cobranca_status: "pendente" | "pago" | "atrasado" | "cancelado"
       movimentacao_tipo: "entrada" | "saida"
+      recorrencia_freq:
+        | "semanal"
+        | "quinzenal"
+        | "mensal"
+        | "bimestral"
+        | "trimestral"
+        | "semestral"
+        | "anual"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -365,6 +405,15 @@ export const Constants = {
     Enums: {
       cobranca_status: ["pendente", "pago", "atrasado", "cancelado"],
       movimentacao_tipo: ["entrada", "saida"],
+      recorrencia_freq: [
+        "semanal",
+        "quinzenal",
+        "mensal",
+        "bimestral",
+        "trimestral",
+        "semestral",
+        "anual",
+      ],
     },
   },
 } as const
