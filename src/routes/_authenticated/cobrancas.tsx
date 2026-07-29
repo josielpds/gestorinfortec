@@ -130,6 +130,7 @@ function CobrancasPage() {
                   <tr>
                     <th className="text-left px-4 py-3">Cliente</th>
                     <th className="text-left px-4 py-3">Descrição</th>
+                    <th className="text-left px-4 py-3">Categoria</th>
                     <th className="text-right px-4 py-3">Valor</th>
                     <th className="text-left px-4 py-3">Vencimento</th>
                     <th className="text-left px-4 py-3">Status</th>
@@ -142,10 +143,21 @@ function CobrancasPage() {
                     return (
                       <tr key={c.id} className="hover:bg-muted/30">
                         <td className="px-4 py-3 font-medium">{c.clientes?.nome ?? "—"}</td>
-                        <td className="px-4 py-3">{c.descricao}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {c.descricao}
+                            {c.recorrente && (
+                              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 gap-1">
+                                <Repeat className="h-3 w-3" /> {FREQ_LABEL[c.frequencia ?? ""] ?? "Recorrente"}
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{c.categorias?.nome ?? "—"}</td>
                         <td className="px-4 py-3 text-right font-semibold">{brl(c.valor)}</td>
                         <td className="px-4 py-3">{fmtDate(c.vencimento)}</td>
                         <td className="px-4 py-3"><StatusBadge status={st} /></td>
+
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           {c.status !== "pago" && (
                             <>
