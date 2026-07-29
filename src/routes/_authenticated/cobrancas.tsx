@@ -105,7 +105,7 @@ function CobrancasPage() {
           action={
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild><Button disabled={clientes.length === 0}><Plus className="h-4 w-4 mr-2" /> Nova Cobrança</Button></DialogTrigger>
-              <CobrancaForm clientes={clientes as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
+              <CobrancaForm clientes={clientes as any} categorias={categorias as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
             </Dialog>
           }
         />
