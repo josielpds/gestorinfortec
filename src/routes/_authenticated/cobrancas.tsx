@@ -200,8 +200,11 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="outline" className={it.c}>{it.l}</Badge>;
 }
 
-function CobrancaForm({ clientes, onSubmit, loading }: { clientes: any[]; onSubmit: (p: any) => void; loading: boolean }) {
-  const [form, setForm] = useState({ cliente_id: "", descricao: "", valor: "", vencimento: todayISO(), observacoes: "" });
+function CobrancaForm({ clientes, categorias, onSubmit, loading }: { clientes: any[]; categorias: any[]; onSubmit: (p: any) => void; loading: boolean }) {
+  const [form, setForm] = useState({
+    cliente_id: "", descricao: "", valor: "", vencimento: todayISO(), observacoes: "",
+    categoria_id: "", recorrente: false, frequencia: "mensal", recorrencia_fim: "",
+  });
   return (
     <DialogContent>
       <DialogHeader><DialogTitle>Nova Cobrança</DialogTitle></DialogHeader>
@@ -216,18 +219,69 @@ function CobrancaForm({ clientes, onSubmit, loading }: { clientes: any[]; onSubm
           </Select>
         </div>
         <div><Label>Descrição *</Label><Input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} /></div>
+        <div>
+          <Label>Categoria de faturamento</Label>
+          <Select value={form.categoria_id} onValueChange={(v) => setForm({ ...form, categoria_id: v })}>
+            <SelectTrigger><SelectValue placeholder="Selecione a fonte de renda" /></SelectTrigger>
+            <SelectContent>
+              {categorias.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {categorias.length === 0 && (
+            <p className="text-xs text-muted-foreground mt-1">Crie categorias de entrada na página Categorias.</p>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <div><Label>Valor (R$) *</Label><Input type="number" step="0.01" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} /></div>
           <div><Label>Vencimento *</Label><Input type="date" value={form.vencimento} onChange={(e) => setForm({ ...form, vencimento: e.target.value })} /></div>
         </div>
+
+        <div className="rounded-lg border p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="flex items-center gap-2"><Repeat className="h-4 w-4 text-primary" /> Mensalidade / recorrência</Label>
+              <p className="text-xs text-muted-foreground mt-1">Ao marcar como paga, a próxima cobrança é criada automaticamente.</p>
+            </div>
+            <Switch checked={form.recorrente} onCheckedChange={(v) => setForm({ ...form, recorrente: v })} />
+          </div>
+          {form.recorrente && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Frequência</Label>
+                <Select value={form.frequencia} onValueChange={(v) => setForm({ ...form, frequencia: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(FREQ_LABEL).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Repetir até (opcional)</Label>
+                <Input type="date" value={form.recorrencia_fim} onChange={(e) => setForm({ ...form, recorrencia_fim: e.target.value })} />
+              </div>
+            </div>
+          )}
+        </div>
+
         <div><Label>Observações</Label><Textarea value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} rows={2} /></div>
       </div>
       <DialogFooter>
         <Button disabled={loading || !form.cliente_id || !form.descricao || !form.valor}
-          onClick={() => onSubmit({ ...form, valor: parseFloat(form.valor) })}>
+          onClick={() => onSubmit({
+            cliente_id: form.cliente_id,
+            descricao: form.descricao,
+            observacoes: form.observacoes,
+            vencimento: form.vencimento,
+            valor: parseFloat(form.valor),
+            categoria_id: form.categoria_id || null,
+            recorrente: form.recorrente,
+            frequencia: form.recorrente ? form.frequencia : null,
+            recorrencia_fim: form.recorrente && form.recorrencia_fim ? form.recorrencia_fim : null,
+          })}>
           {loading ? "Salvando..." : "Criar cobrança"}
         </Button>
       </DialogFooter>
     </DialogContent>
   );
 }
+
