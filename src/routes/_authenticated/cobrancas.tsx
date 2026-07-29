@@ -26,7 +26,14 @@ export const Route = createFileRoute("/_authenticated/cobrancas")({
 type Cobranca = {
   id: string; cliente_id: string; descricao: string; valor: number;
   vencimento: string; status: string; data_pagamento: string | null;
+  recorrente?: boolean; frequencia?: string | null; categoria_id?: string | null;
   clientes?: { nome: string; telefone: string };
+  categorias?: { nome: string } | null;
+};
+
+const FREQ_LABEL: Record<string, string> = {
+  semanal: "Semanal", quinzenal: "Quinzenal", mensal: "Mensal", bimestral: "Bimestral",
+  trimestral: "Trimestral", semestral: "Semestral", anual: "Anual",
 };
 
 function CobrancasPage() {
