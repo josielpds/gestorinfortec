@@ -12,11 +12,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Check, Send, Repeat } from "lucide-react";
+import { Plus, Trash2, Check, Send, Repeat, Pencil, CalendarPlus, CircleSlash } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { brl, fmtDate, effectiveStatus, todayISO } from "@/lib/format";
 import { waLink, renderTemplate } from "@/lib/whatsapp";
+import { FREQ_LABEL, gerarDatas } from "@/lib/recorrencia";
 
 export const Route = createFileRoute("/_authenticated/cobrancas")({
   head: () => ({ meta: [{ title: "Cobranças — CobraZap" }, { name: "description", content: "Cadastro e gestão de cobranças." }] }),
@@ -26,19 +27,17 @@ export const Route = createFileRoute("/_authenticated/cobrancas")({
 type Cobranca = {
   id: string; cliente_id: string; descricao: string; valor: number;
   vencimento: string; status: string; data_pagamento: string | null;
-  recorrente?: boolean; frequencia?: string | null; categoria_id?: string | null;
+  observacoes?: string | null;
+  recorrente?: boolean; frequencia?: string | null; recorrencia_fim?: string | null; categoria_id?: string | null;
   clientes?: { nome: string; telefone: string };
   categorias?: { nome: string } | null;
-};
-
-const FREQ_LABEL: Record<string, string> = {
-  semanal: "Semanal", quinzenal: "Quinzenal", mensal: "Mensal", bimestral: "Bimestral",
-  trimestral: "Trimestral", semestral: "Semestral", anual: "Anual",
 };
 
 function CobrancasPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Cobranca | null>(null);
+  const [gerando, setGerando] = useState<Cobranca | null>(null);
   const [filter, setFilter] = useState<string>("todos");
 
   const { data: cobrancas = [] } = useQuery({
@@ -61,7 +60,6 @@ function CobrancasPage() {
     queryFn: async () => (await supabase.from("categorias").select("id, nome").eq("tipo", "entrada").order("nome")).data ?? [],
   });
 
-
   const { data: tplRow } = useQuery({
     queryKey: ["cfg", "template_cobranca"],
     queryFn: async () => (await supabase.from("configuracoes").select("value").eq("key", "template_cobranca").maybeSingle()).data,
@@ -74,6 +72,55 @@ function CobrancasPage() {
       if (error) throw error;
     },
     onSuccess: () => { toast.success("Cobrança criada"); qc.invalidateQueries(); setOpen(false); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const update = useMutation({
+    mutationFn: async ({ id, ...p }: any) => {
+      const { error } = await supabase.from("cobrancas").update(p).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => { toast.success("Cobrança atualizada"); qc.invalidateQueries(); setEditing(null); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const encerrarRecorrencia = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("cobrancas")
+        .update({ recorrente: false, frequencia: null, recorrencia_fim: null }).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => { toast.success("Recorrência encerrada — esta cobrança não gera mais parcelas"); qc.invalidateQueries(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const gerarParcelas = useMutation({
+    mutationFn: async ({ c, qtd }: { c: Cobranca; qtd: number }) => {
+      const user_id = await currentUserId();
+      const datas = gerarDatas(c.vencimento, c.frequencia ?? "mensal", qtd, c.recorrencia_fim ?? null);
+      if (datas.length === 0) throw new Error("Nenhuma parcela a gerar (limite da recorrência atingido).");
+      const rows = datas.map((v, i) => ({
+        user_id,
+        cliente_id: c.cliente_id,
+        descricao: c.descricao,
+        valor: c.valor,
+        vencimento: v,
+        observacoes: c.observacoes ?? null,
+        categoria_id: c.categoria_id ?? null,
+        origem_id: c.id,
+        // apenas a última parcela mantém a recorrência ativa, evitando duplicidade
+        recorrente: i === datas.length - 1,
+        frequencia: i === datas.length - 1 ? c.frequencia : null,
+        recorrencia_fim: i === datas.length - 1 ? c.recorrencia_fim ?? null : null,
+      }));
+      const { error } = await supabase.from("cobrancas").insert(rows as any);
+      if (error) throw error;
+      const { error: e2 } = await supabase.from("cobrancas")
+        .update({ recorrente: false, frequencia: null, recorrencia_fim: null }).eq("id", c.id);
+      if (e2) throw e2;
+      return datas.length;
+    },
+    onSuccess: (n) => { toast.success(`${n} parcela(s) gerada(s)`); qc.invalidateQueries(); setGerando(null); },
     onError: (e: any) => toast.error(e.message),
   });
 
@@ -119,7 +166,6 @@ function CobrancasPage() {
           ))}
         </div>
 
-
         <Card>
           <CardContent className="p-0">
             {filtered.length === 0 ? (
@@ -154,6 +200,9 @@ function CobrancasPage() {
                               </Badge>
                             )}
                           </div>
+                          {c.recorrente && c.recorrencia_fim && (
+                            <div className="text-xs text-muted-foreground mt-1">até {fmtDate(c.recorrencia_fim)}</div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{c.categorias?.nome ?? "—"}</td>
                         <td className="px-4 py-3 text-right font-semibold">{brl(c.valor)}</td>
@@ -172,9 +221,22 @@ function CobrancasPage() {
                               <Button size="sm" variant="ghost" title="Marcar como pago" onClick={() => marcarPago.mutate(c.id)}>
                                 <Check className="h-4 w-4 text-success" />
                               </Button>
+                              <Button size="sm" variant="ghost" title="Editar" onClick={() => setEditing(c)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
                             </>
                           )}
-                          <Button size="sm" variant="ghost" onClick={() => { if (confirm("Excluir?")) remove.mutate(c.id); }}>
+                          {c.recorrente && (
+                            <>
+                              <Button size="sm" variant="ghost" title="Gerar próximas parcelas" onClick={() => setGerando(c)}>
+                                <CalendarPlus className="h-4 w-4 text-primary" />
+                              </Button>
+                              <Button size="sm" variant="ghost" title="Encerrar recorrência" onClick={() => {
+                                if (confirm("Encerrar a recorrência desta cobrança? As parcelas já criadas continuam.")) encerrarRecorrencia.mutate(c.id);
+                              }}><CircleSlash className="h-4 w-4 text-muted-foreground" /></Button>
+                            </>
+                          )}
+                          <Button size="sm" variant="ghost" title="Excluir" onClick={() => { if (confirm("Excluir?")) remove.mutate(c.id); }}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>
                         </td>
@@ -187,6 +249,28 @@ function CobrancasPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={!!editing} onOpenChange={(v) => !v && setEditing(null)}>
+        {editing && (
+          <CobrancaForm
+            clientes={clientes as any}
+            categorias={categorias as any}
+            initial={editing}
+            loading={update.isPending}
+            onSubmit={(p) => update.mutate({ id: editing.id, ...p })}
+          />
+        )}
+      </Dialog>
+
+      <Dialog open={!!gerando} onOpenChange={(v) => !v && setGerando(null)}>
+        {gerando && (
+          <GerarParcelasForm
+            cobranca={gerando}
+            loading={gerarParcelas.isPending}
+            onSubmit={(qtd) => gerarParcelas.mutate({ c: gerando, qtd })}
+          />
+        )}
+      </Dialog>
     </AppLayout>
   );
 }
@@ -202,14 +286,55 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant="outline" className={it.c}>{it.l}</Badge>;
 }
 
-function CobrancaForm({ clientes, categorias, onSubmit, loading }: { clientes: any[]; categorias: any[]; onSubmit: (p: any) => void; loading: boolean }) {
+function GerarParcelasForm({ cobranca, onSubmit, loading }: { cobranca: Cobranca; onSubmit: (qtd: number) => void; loading: boolean }) {
+  const [qtd, setQtd] = useState("3");
+  const n = Math.max(1, Math.min(36, parseInt(qtd || "0", 10) || 0));
+  const datas = gerarDatas(cobranca.vencimento, cobranca.frequencia ?? "mensal", n, cobranca.recorrencia_fim ?? null);
+  return (
+    <DialogContent>
+      <DialogHeader><DialogTitle>Gerar próximas parcelas</DialogTitle></DialogHeader>
+      <div className="space-y-3 py-2">
+        <p className="text-sm text-muted-foreground">
+          {cobranca.descricao} · {FREQ_LABEL[cobranca.frequencia ?? ""] ?? "Recorrente"} · {brl(cobranca.valor)}
+        </p>
+        <div>
+          <Label>Quantas parcelas adiantar? (1 a 36)</Label>
+          <Input type="number" min={1} max={36} value={qtd} onChange={(e) => setQtd(e.target.value)} />
+        </div>
+        <div className="rounded-lg border p-3 text-sm">
+          {datas.length === 0 ? (
+            <span className="text-muted-foreground">Nenhuma parcela dentro do limite da recorrência.</span>
+          ) : (
+            <ul className="space-y-1">
+              {datas.map((d) => <li key={d} className="flex justify-between"><span>{fmtDate(d)}</span><span className="font-medium">{brl(cobranca.valor)}</span></li>)}
+            </ul>
+          )}
+        </div>
+      </div>
+      <DialogFooter>
+        <Button disabled={loading || datas.length === 0} onClick={() => onSubmit(n)}>
+          {loading ? "Gerando..." : `Gerar ${datas.length} parcela(s)`}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  );
+}
+
+function CobrancaForm({ clientes, categorias, onSubmit, loading, initial }: { clientes: any[]; categorias: any[]; onSubmit: (p: any) => void; loading: boolean; initial?: Cobranca }) {
   const [form, setForm] = useState({
-    cliente_id: "", descricao: "", valor: "", vencimento: todayISO(), observacoes: "",
-    categoria_id: "", recorrente: false, frequencia: "mensal", recorrencia_fim: "",
+    cliente_id: initial?.cliente_id ?? "",
+    descricao: initial?.descricao ?? "",
+    valor: initial ? String(initial.valor) : "",
+    vencimento: initial?.vencimento ?? todayISO(),
+    observacoes: initial?.observacoes ?? "",
+    categoria_id: initial?.categoria_id ?? "",
+    recorrente: initial?.recorrente ?? false,
+    frequencia: initial?.frequencia ?? "mensal",
+    recorrencia_fim: initial?.recorrencia_fim ?? "",
   });
   return (
     <DialogContent>
-      <DialogHeader><DialogTitle>Nova Cobrança</DialogTitle></DialogHeader>
+      <DialogHeader><DialogTitle>{initial ? "Editar cobrança" : "Nova Cobrança"}</DialogTitle></DialogHeader>
       <div className="grid gap-4 py-2">
         <div>
           <Label>Cliente *</Label>
@@ -265,7 +390,7 @@ function CobrancaForm({ clientes, categorias, onSubmit, loading }: { clientes: a
           )}
         </div>
 
-        <div><Label>Observações</Label><Textarea value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} rows={2} /></div>
+        <div><Label>Observações</Label><Textarea value={form.observacoes ?? ""} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} rows={2} /></div>
       </div>
       <DialogFooter>
         <Button disabled={loading || !form.cliente_id || !form.descricao || !form.valor}
@@ -280,10 +405,9 @@ function CobrancaForm({ clientes, categorias, onSubmit, loading }: { clientes: a
             frequencia: form.recorrente ? form.frequencia : null,
             recorrencia_fim: form.recorrente && form.recorrencia_fim ? form.recorrencia_fim : null,
           })}>
-          {loading ? "Salvando..." : "Criar cobrança"}
+          {loading ? "Salvando..." : initial ? "Salvar alterações" : "Criar cobrança"}
         </Button>
       </DialogFooter>
     </DialogContent>
   );
 }
-
