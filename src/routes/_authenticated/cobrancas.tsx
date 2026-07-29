@@ -93,6 +93,7 @@ function CobrancasPage() {
 
   const filtered = cobrancas.filter((c) => {
     if (filter === "todos") return true;
+    if (filter === "recorrente") return !!c.recorrente;
     return effectiveStatus(c.vencimento, c.status) === filter;
   });
 
@@ -110,13 +111,14 @@ function CobrancasPage() {
           }
         />
 
-        <div className="flex gap-2 mb-4">
-          {["todos", "pendente", "atrasado", "pago", "cancelado"].map((s) => (
+        <div className="flex flex-wrap gap-2 mb-4">
+          {["todos", "pendente", "atrasado", "pago", "cancelado", "recorrente"].map((s) => (
             <Button key={s} variant={filter === s ? "default" : "outline"} size="sm" onClick={() => setFilter(s)}>
-              {s === "todos" ? "Todas" : s.charAt(0).toUpperCase() + s.slice(1)}
+              {s === "todos" ? "Todas" : s === "recorrente" ? "Mensalidades" : s.charAt(0).toUpperCase() + s.slice(1)}
             </Button>
           ))}
         </div>
+
 
         <Card>
           <CardContent className="p-0">
