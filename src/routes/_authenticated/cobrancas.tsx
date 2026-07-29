@@ -45,7 +45,7 @@ function CobrancasPage() {
     queryKey: ["cobrancas"],
     queryFn: async () => {
       const { data, error } = await supabase.from("cobrancas")
-        .select("*, clientes(nome, telefone)").order("vencimento");
+        .select("*, clientes(nome, telefone), categorias(nome)").order("vencimento");
       if (error) throw error;
       return data as unknown as Cobranca[];
     },
@@ -55,6 +55,12 @@ function CobrancasPage() {
     queryKey: ["clientes-list"],
     queryFn: async () => (await supabase.from("clientes").select("id, nome, telefone").eq("ativo", true).order("nome")).data ?? [],
   });
+
+  const { data: categorias = [] } = useQuery({
+    queryKey: ["categorias-entrada"],
+    queryFn: async () => (await supabase.from("categorias").select("id, nome").eq("tipo", "entrada").order("nome")).data ?? [],
+  });
+
 
   const { data: tplRow } = useQuery({
     queryKey: ["cfg", "template_cobranca"],
