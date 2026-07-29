@@ -146,6 +146,43 @@ function Faturamento({ from, to }: { from: string; to: string }) {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Faturamento por fonte de renda</CardTitle>
+          <Button variant="outline" size="sm" onClick={() => exportCSV("faturamento-categorias.csv", byCategoria, [
+            { key: "categoria", label: "Categoria" }, { key: "qtd", label: "Cobranças" },
+            { key: "total", label: "Total" }, { key: "recebido", label: "Recebido" },
+          ])}><Download className="h-4 w-4 mr-2" /> Exportar CSV</Button>
+        </CardHeader>
+        <CardContent className="p-0">
+          {byCategoria.length === 0 ? (
+            <div className="py-10 text-center text-muted-foreground text-sm">Nenhuma cobrança no período</div>
+          ) : (
+            <table className="w-full">
+              <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="text-left px-4 py-3">Categoria</th>
+                  <th className="text-right px-4 py-3">Cobranças</th>
+                  <th className="text-right px-4 py-3">Total</th>
+                  <th className="text-right px-4 py-3">Recebido</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {byCategoria.map((c) => (
+                  <tr key={c.categoria} className="hover:bg-muted/30">
+                    <td className="px-4 py-3 font-medium">{c.categoria}</td>
+                    <td className="px-4 py-3 text-right">{c.qtd}</td>
+                    <td className="px-4 py-3 text-right font-semibold">{brl(c.total)}</td>
+                    <td className="px-4 py-3 text-right text-success">{brl(c.recebido)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Detalhamento ({stats.qtd})</CardTitle>
           <Button variant="outline" size="sm" onClick={() => exportCSV("faturamento.csv", data.map((c: any) => ({
             cliente: c.clientes?.nome, descricao: c.descricao, valor: c.valor,
