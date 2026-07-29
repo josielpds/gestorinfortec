@@ -105,6 +105,19 @@ function Faturamento({ from, to }: { from: string; to: string }) {
     return Object.values(map).sort((a, b) => a.mes.localeCompare(b.mes));
   }, [data]);
 
+  const byCategoria = useMemo(() => {
+    const map: Record<string, { categoria: string; total: number; recebido: number; qtd: number }> = {};
+    data.forEach((c) => {
+      const nome = c.categorias?.nome ?? "Sem categoria";
+      map[nome] = map[nome] ?? { categoria: nome, total: 0, recebido: 0, qtd: 0 };
+      map[nome].total += Number(c.valor);
+      map[nome].qtd += 1;
+      if (c.status === "pago") map[nome].recebido += Number(c.valor);
+    });
+    return Object.values(map).sort((a, b) => b.total - a.total);
+  }, [data]);
+
+
   return (
     <div className="mt-4 space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
