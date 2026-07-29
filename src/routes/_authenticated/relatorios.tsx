@@ -81,8 +81,9 @@ function exportCSV(filename: string, rows: any[], headers: { key: string; label:
 function Faturamento({ from, to }: { from: string; to: string }) {
   const { data = [] } = useQuery({
     queryKey: ["rel-fat", from, to],
-    queryFn: async () => ((await supabase.from("cobrancas").select("*, clientes(nome)")
+    queryFn: async () => ((await supabase.from("cobrancas").select("*, clientes(nome), categorias(nome)")
       .gte("vencimento", from).lte("vencimento", to)).data ?? []) as any[],
+
   });
 
   const stats = useMemo(() => {
