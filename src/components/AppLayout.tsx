@@ -1,9 +1,10 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Users, Receipt, MessageCircle, BarChart3, Settings, Zap, Wallet, Tags, LogOut } from "lucide-react";
+import { LayoutDashboard, Users, Receipt, MessageCircle, BarChart3, Settings, Zap, Wallet, Tags, LogOut, ShieldCheck, Lock } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useIsMaster, useMyProfile } from "@/hooks/useAdmin";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 
@@ -23,6 +24,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: user } = useCurrentUser();
+  const { isMaster } = useIsMaster();
+  const { data: profile } = useMyProfile();
+
+  const items = isMaster ? [...nav, { to: "/usuarios", label: "Usuários", icon: ShieldCheck }] : nav;
 
   const signOut = async () => {
     await qc.cancelQueries();
@@ -30,6 +35,27 @@ export function AppLayout({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
     navigate({ to: "/auth", replace: true });
   };
+
+  if (profile?.bloqueado) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-6">
+        <div className="max-w-md text-center space-y-4">
+          <div className="mx-auto h-14 w-14 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center">
+            <Lock className="h-7 w-7" />
+          </div>
+          <h1 className="text-2xl font-bold">Acesso bloqueado</h1>
+          <p className="text-muted-foreground">
+            Sua conta está bloqueada pelo administrador. Entre em contato para regularizar sua
+            assinatura e liberar o acesso.
+          </p>
+          <Button variant="outline" onClick={signOut}>
+            <LogOut className="h-4 w-4 mr-2" /> Sair
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
 
   return (
     <div className="flex min-h-screen bg-background">
