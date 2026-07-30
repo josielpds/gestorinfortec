@@ -347,7 +347,7 @@ function CobrancasPage() {
                           </td>
                         </tr>
                         {aberto && ordenadas.map((c) => renderLinha(c, true))}
-                      </>
+                      </Fragment>
                     );
                   })}
                 </tbody>
