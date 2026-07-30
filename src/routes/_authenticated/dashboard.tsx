@@ -53,7 +53,35 @@ function Dashboard() {
     return dias > 0 && dias <= 3;
   });
 
-  const proximas = cobrancas.filter((c) => c.status === "pendente").slice(0, 5);
+  // Uma linha por cliente, com o próximo vencimento em aberto
+  const porCliente = new Map<
+    string,
+    { id: string; nome: string; prox: string; proxValor: number; count: number; total: number }
+  >();
+  cobrancas
+    .filter((c) => c.status === "pendente")
+    .slice()
+    .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+    .forEach((c) => {
+      const key = c.cliente_id ?? c.id;
+      const atual = porCliente.get(key);
+      if (!atual) {
+        porCliente.set(key, {
+          id: key,
+          nome: c.clientes?.nome ?? "—",
+          prox: c.vencimento,
+          proxValor: Number(c.valor),
+          count: 1,
+          total: Number(c.valor),
+        });
+      } else {
+        atual.count += 1;
+        atual.total += Number(c.valor);
+      }
+    });
+  const proximas = Array.from(porCliente.values())
+    .sort((a, b) => a.prox.localeCompare(b.prox))
+    .slice(0, 6);
 
   return (
     <AppLayout>
