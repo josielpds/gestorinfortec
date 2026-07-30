@@ -233,25 +233,61 @@ export type Database = {
       }
       profiles: {
         Row: {
+          assinatura_expira: string | null
+          assinatura_status: string
+          bloqueado: boolean
           created_at: string
+          email: string | null
           empresa: string | null
           id: string
           nome: string | null
+          plano: string
           updated_at: string
         }
         Insert: {
+          assinatura_expira?: string | null
+          assinatura_status?: string
+          bloqueado?: boolean
           created_at?: string
+          email?: string | null
           empresa?: string | null
           id: string
           nome?: string | null
+          plano?: string
           updated_at?: string
         }
         Update: {
+          assinatura_expira?: string | null
+          assinatura_status?: string
+          bloqueado?: boolean
           created_at?: string
+          email?: string | null
           empresa?: string | null
           id?: string
           nome?: string | null
+          plano?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
         }
         Relationships: []
       }
@@ -260,12 +296,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
       proximo_vencimento: {
         Args: { d: string; f: Database["public"]["Enums"]["recorrencia_freq"] }
         Returns: string
       }
     }
     Enums: {
+      app_role: "master" | "user"
       cobranca_status: "pendente" | "pago" | "atrasado" | "cancelado"
       movimentacao_tipo: "entrada" | "saida"
       recorrencia_freq:
@@ -403,6 +447,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      app_role: ["master", "user"],
       cobranca_status: ["pendente", "pago", "atrasado", "cancelado"],
       movimentacao_tipo: ["entrada", "saida"],
       recorrencia_freq: [

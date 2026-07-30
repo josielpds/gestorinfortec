@@ -53,7 +53,35 @@ function Dashboard() {
     return dias > 0 && dias <= 3;
   });
 
-  const proximas = cobrancas.filter((c) => c.status === "pendente").slice(0, 5);
+  // Uma linha por cliente, com o próximo vencimento em aberto
+  const porCliente = new Map<
+    string,
+    { id: string; nome: string; prox: string; proxValor: number; count: number; total: number }
+  >();
+  cobrancas
+    .filter((c) => c.status === "pendente")
+    .slice()
+    .sort((a, b) => a.vencimento.localeCompare(b.vencimento))
+    .forEach((c) => {
+      const key = c.cliente_id ?? c.id;
+      const atual = porCliente.get(key);
+      if (!atual) {
+        porCliente.set(key, {
+          id: key,
+          nome: c.clientes?.nome ?? "—",
+          prox: c.vencimento,
+          proxValor: Number(c.valor),
+          count: 1,
+          total: Number(c.valor),
+        });
+      } else {
+        atual.count += 1;
+        atual.total += Number(c.valor);
+      }
+    });
+  const proximas = Array.from(porCliente.values())
+    .sort((a, b) => a.prox.localeCompare(b.prox))
+    .slice(0, 6);
 
   return (
     <AppLayout>
@@ -94,13 +122,21 @@ function Dashboard() {
               </div>
             ) : (
               <div className="divide-y">
-                {proximas.map((c) => (
-                  <div key={c.id} className="flex items-center justify-between py-3">
+                {proximas.map((g) => (
+                  <div key={g.id} className="flex items-center justify-between py-3">
                     <div>
-                      <div className="font-medium">{c.clientes?.nome ?? "—"}</div>
-                      <div className="text-sm text-muted-foreground">{c.descricao} · vence {fmtDate(c.vencimento)}</div>
+                      <div className="font-medium">{g.nome}</div>
+                      <div className="text-sm text-muted-foreground">
+                        Próximo vencimento em {fmtDate(g.prox)}
+                        {g.count > 1 && ` · ${g.count} cobranças em aberto`}
+                      </div>
                     </div>
-                    <div className="font-semibold">{brl(c.valor)}</div>
+                    <div className="text-right">
+                      <div className="font-semibold">{brl(g.total)}</div>
+                      {g.count > 1 && (
+                        <div className="text-xs text-muted-foreground">próxima {brl(g.proxValor)}</div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
