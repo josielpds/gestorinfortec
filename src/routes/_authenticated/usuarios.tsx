@@ -80,7 +80,13 @@ function Usuarios() {
   });
 
   const atualizar = useMutation({
-    mutationFn: async ({ id, patch }: { id: string; patch: Record<string, unknown> }) => {
+    mutationFn: async ({
+      id,
+      patch,
+    }: {
+      id: string;
+      patch: Partial<Pick<Perfil, "plano" | "assinatura_status" | "assinatura_expira" | "bloqueado">>;
+    }) => {
       const { error } = await supabase.from("profiles").update(patch).eq("id", id);
       if (error) throw error;
     },
