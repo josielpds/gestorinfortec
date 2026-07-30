@@ -310,8 +310,8 @@ function CobrancasPage() {
                     const aberto = expandido === g.key;
                     const head = proxima ?? ordenadas[ordenadas.length - 1];
                     return (
-                      <>
-                        <tr key={g.key} className="bg-muted/20 hover:bg-muted/30">
+                      <Fragment key={g.key}>
+                        <tr className="bg-muted/20 hover:bg-muted/30">
                           <td className="px-4 py-3 font-medium">{head.clientes?.nome ?? "—"}</td>
                           <td className="px-4 py-3">
                             <button className="flex items-center gap-2 text-left" onClick={() => setExpandido(aberto ? null : g.key)}>
