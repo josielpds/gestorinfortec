@@ -122,13 +122,21 @@ function Dashboard() {
               </div>
             ) : (
               <div className="divide-y">
-                {proximas.map((c) => (
-                  <div key={c.id} className="flex items-center justify-between py-3">
+                {proximas.map((g) => (
+                  <div key={g.id} className="flex items-center justify-between py-3">
                     <div>
-                      <div className="font-medium">{c.clientes?.nome ?? "—"}</div>
-                      <div className="text-sm text-muted-foreground">{c.descricao} · vence {fmtDate(c.vencimento)}</div>
+                      <div className="font-medium">{g.nome}</div>
+                      <div className="text-sm text-muted-foreground">
+                        Próximo vencimento em {fmtDate(g.prox)}
+                        {g.count > 1 && ` · ${g.count} cobranças em aberto`}
+                      </div>
                     </div>
-                    <div className="font-semibold">{brl(c.valor)}</div>
+                    <div className="text-right">
+                      <div className="font-semibold">{brl(g.total)}</div>
+                      {g.count > 1 && (
+                        <div className="text-xs text-muted-foreground">próxima {brl(g.proxValor)}</div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
