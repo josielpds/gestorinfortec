@@ -139,6 +139,65 @@ function CobrancasPage() {
     onSuccess: () => { toast.success("Cobrança excluída"); qc.invalidateQueries(); },
   });
 
+  const renderLinha = (c: Cobranca, filha: boolean) => {
+    const st = effectiveStatus(c.vencimento, c.status);
+    return (
+      <tr key={c.id} className={filha ? "bg-background/50 hover:bg-muted/30 text-sm" : "hover:bg-muted/30"}>
+        <td className={"px-4 py-3 font-medium" + (filha ? " pl-10 text-muted-foreground" : "")}>
+          {filha ? "" : c.clientes?.nome ?? "—"}
+        </td>
+        <td className={"px-4 py-3" + (filha ? " pl-10" : "")}>
+          <div className="flex items-center gap-2">
+            {filha ? <span className="text-muted-foreground">Parcela · {c.descricao}</span> : c.descricao}
+            {!filha && c.recorrente && (
+              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 gap-1">
+                <Repeat className="h-3 w-3" /> {FREQ_LABEL[c.frequencia ?? ""] ?? "Recorrente"}
+              </Badge>
+            )}
+          </div>
+          {!filha && c.recorrente && c.recorrencia_fim && (
+            <div className="text-xs text-muted-foreground mt-1">até {fmtDate(c.recorrencia_fim)}</div>
+          )}
+        </td>
+        <td className="px-4 py-3 text-muted-foreground">{c.categorias?.nome ?? "—"}</td>
+        <td className="px-4 py-3 text-right font-semibold">{brl(c.valor)}</td>
+        <td className="px-4 py-3">{fmtDate(c.vencimento)}</td>
+        <td className="px-4 py-3"><StatusBadge status={st} /></td>
+        <td className="px-4 py-3 text-right whitespace-nowrap">
+          {c.status !== "pago" && (
+            <>
+              <Button size="sm" variant="ghost" title="Enviar WhatsApp" onClick={() => {
+                const msg = renderTemplate(tplRow?.value ?? "Olá {nome}, cobrança de R$ {valor}.", {
+                  nome: c.clientes?.nome ?? "", valor: c.valor, descricao: c.descricao, vencimento: c.vencimento,
+                });
+                window.open(waLink(c.clientes?.telefone ?? "", msg), "_blank");
+              }}><Send className="h-4 w-4 text-primary" /></Button>
+              <Button size="sm" variant="ghost" title="Dar baixa (marcar como pago)" onClick={() => marcarPago.mutate(c.id)}>
+                <Check className="h-4 w-4 text-success" />
+              </Button>
+              <Button size="sm" variant="ghost" title="Editar" onClick={() => setEditing(c)}>
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          {c.recorrente && (
+            <>
+              <Button size="sm" variant="ghost" title="Gerar próximas parcelas" onClick={() => setGerando(c)}>
+                <CalendarPlus className="h-4 w-4 text-primary" />
+              </Button>
+              <Button size="sm" variant="ghost" title="Encerrar recorrência" onClick={() => {
+                if (confirm("Encerrar a recorrência desta cobrança? As parcelas já criadas continuam.")) encerrarRecorrencia.mutate(c.id);
+              }}><CircleSlash className="h-4 w-4 text-muted-foreground" /></Button>
+            </>
+          )}
+          <Button size="sm" variant="ghost" title="Excluir" onClick={() => { if (confirm("Excluir?")) remove.mutate(c.id); }}>
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        </td>
+      </tr>
+    );
+  };
+
   const filtered = cobrancas.filter((c) => {
     if (filter === "todos") return true;
     if (filter === "recorrente") return !!c.recorrente || !!c.origem_id;
