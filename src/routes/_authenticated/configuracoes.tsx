@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { currentUserId } from "@/hooks/useCurrentUser";
+import { baixarBackupCompleto } from "@/lib/backup";
+import { Download } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
   head: () => ({ meta: [
