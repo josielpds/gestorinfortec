@@ -28,7 +28,7 @@ type Cobranca = {
   id: string; cliente_id: string; descricao: string; valor: number;
   vencimento: string; status: string; data_pagamento: string | null;
   observacoes?: string | null;
-  recorrente?: boolean; frequencia?: string | null; recorrencia_fim?: string | null; categoria_id?: string | null;
+  recorrente?: boolean; frequencia?: string | null; recorrencia_fim?: string | null; categoria_id?: string | null; origem_id?: string | null;
   clientes?: { nome: string; telefone: string };
   categorias?: { nome: string } | null;
 };
