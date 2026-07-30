@@ -115,6 +115,30 @@ function ConfigPage() {
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle>Backup dos dados</CardTitle>
+              <CardDescription>Baixe um arquivo JSON com clientes, cobranças, movimentações, categorias e configurações.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button variant="outline" disabled={backupLoading} onClick={async () => {
+                setBackupLoading(true);
+                try {
+                  const r = await baixarBackupCompleto();
+                  toast.success(`Backup gerado: ${r.clientes} clientes, ${r.cobrancas} cobranças, ${r.movimentacoes} movimentações`);
+                } catch (e: any) {
+                  toast.error(e.message);
+                } finally {
+                  setBackupLoading(false);
+                }
+              }}>
+                <Download className="h-4 w-4 mr-2" />
+                {backupLoading ? "Gerando backup..." : "Fazer backup completo agora"}
+              </Button>
+            </CardContent>
+          </Card>
+
+
           <Button onClick={() => save.mutate()} disabled={save.isPending}>
             {save.isPending ? "Salvando..." : "Salvar configurações"}
           </Button>
