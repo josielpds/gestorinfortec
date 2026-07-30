@@ -37,6 +37,7 @@ function ConfigPage() {
   const [form, setForm] = useState<Record<string, string>>({});
   const [nome, setNome] = useState("");
   const [empresa, setEmpresa] = useState("");
+  const [backupLoading, setBackupLoading] = useState(false);
 
   useEffect(() => {
     const m: Record<string, string> = {};
