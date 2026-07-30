@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { currentUserId } from "@/hooks/useCurrentUser";
+import { baixarBackupCompleto } from "@/lib/backup";
+import { Download } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
   head: () => ({ meta: [
@@ -35,6 +37,7 @@ function ConfigPage() {
   const [form, setForm] = useState<Record<string, string>>({});
   const [nome, setNome] = useState("");
   const [empresa, setEmpresa] = useState("");
+  const [backupLoading, setBackupLoading] = useState(false);
 
   useEffect(() => {
     const m: Record<string, string> = {};
@@ -114,6 +117,30 @@ function ConfigPage() {
               </div>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Backup dos dados</CardTitle>
+              <CardDescription>Baixe um arquivo JSON com clientes, cobranças, movimentações, categorias e configurações.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button variant="outline" disabled={backupLoading} onClick={async () => {
+                setBackupLoading(true);
+                try {
+                  const r = await baixarBackupCompleto();
+                  toast.success(`Backup gerado: ${r.clientes} clientes, ${r.cobrancas} cobranças, ${r.movimentacoes} movimentações`);
+                } catch (e: any) {
+                  toast.error(e.message);
+                } finally {
+                  setBackupLoading(false);
+                }
+              }}>
+                <Download className="h-4 w-4 mr-2" />
+                {backupLoading ? "Gerando backup..." : "Fazer backup completo agora"}
+              </Button>
+            </CardContent>
+          </Card>
+
 
           <Button onClick={() => save.mutate()} disabled={save.isPending}>
             {save.isPending ? "Salvando..." : "Salvar configurações"}
