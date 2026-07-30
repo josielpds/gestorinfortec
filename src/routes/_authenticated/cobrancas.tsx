@@ -39,6 +39,7 @@ function CobrancasPage() {
   const [editing, setEditing] = useState<Cobranca | null>(null);
   const [gerando, setGerando] = useState<Cobranca | null>(null);
   const [filter, setFilter] = useState<string>("todos");
+  const [expandido, setExpandido] = useState<string | null>(null);
 
   const { data: cobrancas = [] } = useQuery({
     queryKey: ["cobrancas"],
