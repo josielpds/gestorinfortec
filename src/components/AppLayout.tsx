@@ -70,7 +70,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {nav.map((n) => {
+          {items.map((n) => {
             const active = pathname === n.to || pathname.startsWith(n.to + "/");
             const Icon = n.icon;
             return (
