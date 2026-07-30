@@ -140,9 +140,43 @@ function CobrancasPage() {
 
   const filtered = cobrancas.filter((c) => {
     if (filter === "todos") return true;
-    if (filter === "recorrente") return !!c.recorrente;
+    if (filter === "recorrente") return !!c.recorrente || !!c.origem_id;
     return effectiveStatus(c.vencimento, c.status) === filter;
   });
+
+  // Agrupa as parcelas de uma mesma mensalidade (série) em uma única linha
+  const grupos: { key: string; itens: Cobranca[] }[] = [];
+  const idx = new Map<string, number>();
+  for (const c of filtered) {
+    const key = c.origem_id ?? c.id;
+    if (!idx.has(key)) { idx.set(key, grupos.length); grupos.push({ key, itens: [] }); }
+    grupos[idx.get(key)!].itens.push(c);
+  }
+
+  const mes = todayISO().slice(0, 7);
+  const recebidoMes = cobrancas
+    .filter((c) => c.status === "pago" && (c.data_pagamento ?? c.vencimento).slice(0, 7) === mes)
+    .reduce((s, c) => s + Number(c.valor), 0);
+  const aReceberMes = cobrancas
+    .filter((c) => c.status === "pendente" && c.vencimento.slice(0, 7) === mes)
+    .reduce((s, c) => s + Number(c.valor), 0);
+  const previsao = cobrancas
+    .filter((c) => c.status === "pendente" && c.vencimento.slice(0, 7) > mes)
+    .reduce((s, c) => s + Number(c.valor), 0);
+
+  const proximosMeses = (() => {
+    const out: { mes: string; total: number }[] = [];
+    const base = new Date(todayISO() + "T00:00:00");
+    for (let i = 1; i <= 6; i++) {
+      const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const total = cobrancas
+        .filter((c) => c.status === "pendente" && c.vencimento.slice(0, 7) === key)
+        .reduce((s, c) => s + Number(c.valor), 0);
+      out.push({ mes: d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }), total });
+    }
+    return out;
+  })();
 
   return (
     <AppLayout>
@@ -158,6 +192,24 @@ function CobrancasPage() {
           }
         />
 
+        <div className="grid gap-4 sm:grid-cols-3 mb-6">
+          <Card><CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Recebido no mês</p>
+            <p className="text-2xl font-bold text-success mt-1">{brl(recebidoMes)}</p>
+          </CardContent></Card>
+          <Card><CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">A receber neste mês</p>
+            <p className="text-2xl font-bold mt-1">{brl(aReceberMes)}</p>
+          </CardContent></Card>
+          <Card><CardContent className="p-4">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Previsão próximos meses</p>
+            <p className="text-2xl font-bold text-primary mt-1">{brl(previsao)}</p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
+              {proximosMeses.map((m) => <span key={m.mes}>{m.mes}: <span className="font-medium text-foreground">{brl(m.total)}</span></span>)}
+            </div>
+          </CardContent></Card>
+        </div>
+
         <div className="flex flex-wrap gap-2 mb-4">
           {["todos", "pendente", "atrasado", "pago", "cancelado", "recorrente"].map((s) => (
             <Button key={s} variant={filter === s ? "default" : "outline"} size="sm" onClick={() => setFilter(s)}>
@@ -168,7 +220,7 @@ function CobrancasPage() {
 
         <Card>
           <CardContent className="p-0">
-            {filtered.length === 0 ? (
+            {grupos.length === 0 ? (
               <div className="py-16 text-center text-muted-foreground">
                 {clientes.length === 0 ? "Cadastre um cliente antes de criar cobranças" : "Nenhuma cobrança encontrada"}
               </div>
@@ -186,61 +238,56 @@ function CobrancasPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {filtered.map((c) => {
-                    const st = effectiveStatus(c.vencimento, c.status);
+                  {grupos.map((g) => {
+                    const isSerie = g.itens.length > 1;
+                    if (!isSerie) {
+                      return renderLinha(g.itens[0], false);
+                    }
+                    const ordenadas = [...g.itens].sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+                    const pendentes = ordenadas.filter((c) => c.status === "pendente");
+                    const proxima = pendentes[0];
+                    const pagas = ordenadas.filter((c) => c.status === "pago");
+                    const aberto = expandido === g.key;
+                    const head = proxima ?? ordenadas[ordenadas.length - 1];
                     return (
-                      <tr key={c.id} className="hover:bg-muted/30">
-                        <td className="px-4 py-3 font-medium">{c.clientes?.nome ?? "—"}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            {c.descricao}
-                            {c.recorrente && (
+                      <>
+                        <tr key={g.key} className="bg-muted/20 hover:bg-muted/30">
+                          <td className="px-4 py-3 font-medium">{head.clientes?.nome ?? "—"}</td>
+                          <td className="px-4 py-3">
+                            <button className="flex items-center gap-2 text-left" onClick={() => setExpandido(aberto ? null : g.key)}>
+                              {aberto ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              <span>{head.descricao}</span>
                               <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 gap-1">
-                                <Repeat className="h-3 w-3" /> {FREQ_LABEL[c.frequencia ?? ""] ?? "Recorrente"}
+                                <Repeat className="h-3 w-3" /> Mensalidade
                               </Badge>
-                            )}
-                          </div>
-                          {c.recorrente && c.recorrencia_fim && (
-                            <div className="text-xs text-muted-foreground mt-1">até {fmtDate(c.recorrencia_fim)}</div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">{c.categorias?.nome ?? "—"}</td>
-                        <td className="px-4 py-3 text-right font-semibold">{brl(c.valor)}</td>
-                        <td className="px-4 py-3">{fmtDate(c.vencimento)}</td>
-                        <td className="px-4 py-3"><StatusBadge status={st} /></td>
-
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          {c.status !== "pago" && (
-                            <>
-                              <Button size="sm" variant="ghost" title="Enviar WhatsApp" onClick={() => {
-                                const msg = renderTemplate(tplRow?.value ?? "Olá {nome}, cobrança de R$ {valor}.", {
-                                  nome: c.clientes?.nome ?? "", valor: c.valor, descricao: c.descricao, vencimento: c.vencimento,
-                                });
-                                window.open(waLink(c.clientes?.telefone ?? "", msg), "_blank");
-                              }}><Send className="h-4 w-4 text-primary" /></Button>
-                              <Button size="sm" variant="ghost" title="Marcar como pago" onClick={() => marcarPago.mutate(c.id)}>
+                            </button>
+                            <div className="text-xs text-muted-foreground mt-1 ml-6">
+                              {pagas.length} paga(s) · {pendentes.length} pendente(s)
+                              {proxima && <> · próxima em {fmtDate(proxima.vencimento)}</>}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{head.categorias?.nome ?? "—"}</td>
+                          <td className="px-4 py-3 text-right font-semibold">
+                            {brl(pendentes.reduce((s, c) => s + Number(c.valor), 0))}
+                            <div className="text-xs font-normal text-muted-foreground">em aberto</div>
+                          </td>
+                          <td className="px-4 py-3">{proxima ? fmtDate(proxima.vencimento) : "—"}</td>
+                          <td className="px-4 py-3">
+                            {proxima ? <StatusBadge status={effectiveStatus(proxima.vencimento, proxima.status)} /> : <StatusBadge status="pago" />}
+                          </td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            {proxima && (
+                              <Button size="sm" variant="ghost" title="Dar baixa na próxima parcela" onClick={() => marcarPago.mutate(proxima.id)}>
                                 <Check className="h-4 w-4 text-success" />
                               </Button>
-                              <Button size="sm" variant="ghost" title="Editar" onClick={() => setEditing(c)}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-                          {c.recorrente && (
-                            <>
-                              <Button size="sm" variant="ghost" title="Gerar próximas parcelas" onClick={() => setGerando(c)}>
-                                <CalendarPlus className="h-4 w-4 text-primary" />
-                              </Button>
-                              <Button size="sm" variant="ghost" title="Encerrar recorrência" onClick={() => {
-                                if (confirm("Encerrar a recorrência desta cobrança? As parcelas já criadas continuam.")) encerrarRecorrencia.mutate(c.id);
-                              }}><CircleSlash className="h-4 w-4 text-muted-foreground" /></Button>
-                            </>
-                          )}
-                          <Button size="sm" variant="ghost" title="Excluir" onClick={() => { if (confirm("Excluir?")) remove.mutate(c.id); }}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </td>
-                      </tr>
+                            )}
+                            <Button size="sm" variant="ghost" title={aberto ? "Ocultar parcelas" : "Ver parcelas"} onClick={() => setExpandido(aberto ? null : g.key)}>
+                              {aberto ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            </Button>
+                          </td>
+                        </tr>
+                        {aberto && ordenadas.map((c) => renderLinha(c, true))}
+                      </>
                     );
                   })}
                 </tbody>
@@ -249,6 +296,7 @@ function CobrancasPage() {
           </CardContent>
         </Card>
       </div>
+
 
       <Dialog open={!!editing} onOpenChange={(v) => !v && setEditing(null)}>
         {editing && (
