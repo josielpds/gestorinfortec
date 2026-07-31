@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { currentUserId } from "@/hooks/useCurrentUser";
 import { baixarBackupCompleto } from "@/lib/backup";
-import { Download } from "lucide-react";
+import { Download, KeyRound } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
   head: () => ({ meta: [
@@ -38,6 +38,9 @@ function ConfigPage() {
   const [nome, setNome] = useState("");
   const [empresa, setEmpresa] = useState("");
   const [backupLoading, setBackupLoading] = useState(false);
+  const [novaSenha, setNovaSenha] = useState("");
+  const [confirmaSenha, setConfirmaSenha] = useState("");
+  const [senhaLoading, setSenhaLoading] = useState(false);
 
   useEffect(() => {
     const m: Record<string, string> = {};
@@ -137,6 +140,36 @@ function ConfigPage() {
               }}>
                 <Download className="h-4 w-4 mr-2" />
                 {backupLoading ? "Gerando backup..." : "Fazer backup completo agora"}
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Alterar senha</CardTitle>
+              <CardDescription>Defina uma nova senha de acesso à sua conta.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label>Nova senha</Label>
+                <Input type="password" value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)} autoComplete="new-password" minLength={6} />
+              </div>
+              <div>
+                <Label>Confirmar nova senha</Label>
+                <Input type="password" value={confirmaSenha} onChange={(e) => setConfirmaSenha(e.target.value)} autoComplete="new-password" minLength={6} />
+              </div>
+              <Button size="sm" variant="outline" disabled={senhaLoading} onClick={async () => {
+                if (novaSenha.length < 6) { toast.error("A senha deve ter no mínimo 6 caracteres"); return; }
+                if (novaSenha !== confirmaSenha) { toast.error("As senhas não conferem"); return; }
+                setSenhaLoading(true);
+                const { error } = await supabase.auth.updateUser({ password: novaSenha });
+                setSenhaLoading(false);
+                if (error) { toast.error(error.message); return; }
+                setNovaSenha(""); setConfirmaSenha("");
+                toast.success("Senha alterada com sucesso");
+              }}>
+                <KeyRound className="h-4 w-4 mr-2" />
+                {senhaLoading ? "Alterando..." : "Alterar senha"}
               </Button>
             </CardContent>
           </Card>
