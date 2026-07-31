@@ -75,6 +75,7 @@ function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [recuperando, setRecuperando] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,14 +89,30 @@ function LoginForm() {
     navigate({ to: "/dashboard", replace: true });
   };
 
+  const recuperar = async () => {
+    const parsed = z.string().trim().email().max(255).safeParse(email);
+    if (!parsed.success) { toast.error("Informe seu email acima para recuperar a senha"); return; }
+    setRecuperando(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(parsed.data, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setRecuperando(false);
+    if (error) { toast.error(error.message); return; }
+    toast.success("Enviamos um link de recuperação para o seu email.");
+  };
+
   return (
     <form onSubmit={submit} className="space-y-4 mt-4">
       <div><Label>Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required /></div>
       <div><Label>Senha</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></div>
       <Button className="w-full" disabled={loading}>{loading ? "Entrando..." : "Entrar"}</Button>
+      <Button type="button" variant="link" className="w-full h-auto p-0 text-sm" disabled={recuperando} onClick={recuperar}>
+        {recuperando ? "Enviando link..." : "Esqueci minha senha"}
+      </Button>
     </form>
   );
 }
+
 
 function SignupForm() {
   const navigate = useNavigate();
