@@ -27,6 +27,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const { data: user } = useCurrentUser();
   const { isMaster } = useIsMaster();
   const { data: profile } = useMyProfile();
+  const atrasadas = useAtrasadasCount();
 
   const items = isMaster ? [...nav, { to: "/usuarios", label: "Usuários", icon: ShieldCheck }] : nav;
 
