@@ -75,6 +75,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           {items.map((n) => {
             const active = pathname === n.to || pathname.startsWith(n.to + "/");
             const Icon = n.icon;
+            const alerta = n.to === "/mensagens" && atrasadas > 0;
             return (
               <Link
                 key={n.to}
@@ -83,11 +84,26 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors",
                   active
                     ? "bg-primary text-primary-foreground font-medium"
-                    : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    : alerta
+                      ? "bg-destructive/15 text-destructive font-medium hover:bg-destructive/25"
+                      : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                 )}
               >
                 <Icon className="h-4 w-4" />
-                {n.label}
+                <span className="flex-1">{n.label}</span>
+                {alerta && (
+                  <span
+                    title={`${atrasadas} mensalidade(s) em atraso`}
+                    className={cn(
+                      "min-w-5 h-5 px-1.5 rounded-full text-[11px] font-bold flex items-center justify-center",
+                      active
+                        ? "bg-primary-foreground text-primary"
+                        : "bg-destructive text-destructive-foreground",
+                    )}
+                  >
+                    {atrasadas}
+                  </span>
+                )}
               </Link>
             );
           })}
