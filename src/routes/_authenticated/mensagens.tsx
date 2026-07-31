@@ -50,7 +50,14 @@ function MensagensPage() {
 
         <Tabs defaultValue="atrasadas">
           <TabsList>
-            <TabsTrigger value="atrasadas"><AlertTriangle className="h-4 w-4 mr-2" /> Atrasadas ({atrasadas.length})</TabsTrigger>
+            <TabsTrigger value="atrasadas" className="text-destructive data-[state=active]:bg-destructive data-[state=active]:text-destructive-foreground">
+              <AlertTriangle className="h-4 w-4 mr-2" /> Atrasadas
+              {atrasadas.length > 0 && (
+                <span className="ml-2 min-w-5 h-5 px-1.5 rounded-full bg-destructive text-destructive-foreground text-[11px] font-bold flex items-center justify-center data-[state=active]:bg-transparent">
+                  {atrasadas.length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="hoje"><Clock className="h-4 w-4 mr-2" /> Vencem hoje ({hoje.length})</TabsTrigger>
             <TabsTrigger value="proximas"><MessageCircle className="h-4 w-4 mr-2" /> Próximas ({proximas.length})</TabsTrigger>
             <TabsTrigger value="livre">Mensagem livre</TabsTrigger>
