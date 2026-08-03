@@ -108,17 +108,28 @@ function ConfigPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <Label>Cobrança padrão</Label>
+                <Label>Cobrança padrão (Dia do Vencimento)</Label>
                 <Textarea rows={3} value={form.template_cobranca ?? ""} onChange={(e) => set("template_cobranca", e.target.value)} />
               </div>
               <div>
-                <Label>Cobrança em atraso</Label>
+                <Label>Cobrança em atraso (Geral)</Label>
                 <Textarea rows={3} value={form.template_atraso ?? ""} onChange={(e) => set("template_atraso", e.target.value)} />
               </div>
               <div>
-                <Label>Lembrete preventivo</Label>
+                <Label>Cobrança em atraso (5 dias após vencimento)</Label>
+                <Textarea rows={3} value={form.template_atraso_5d ?? ""} onChange={(e) => set("template_atraso_5d", e.target.value)} placeholder="Olá {nome}, sua cobrança de {valor} venceu há 5 dias ({vencimento})..." />
+              </div>
+              <div>
+                <Label>Cobrança em atraso (7 dias após vencimento)</Label>
+                <Textarea rows={3} value={form.template_atraso_7d ?? ""} onChange={(e) => set("template_atraso_7d", e.target.value)} placeholder="Aviso Importante: Olá {nome}, sua cobrança de {valor} está com 7 dias de atraso ({vencimento})..." />
+              </div>
+              <div>
+                <Label>Lembrete preventivo (Antes do vencimento)</Label>
                 <Textarea rows={3} value={form.template_lembrete ?? ""} onChange={(e) => set("template_lembrete", e.target.value)} />
               </div>
+              <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending}>
+                {save.isPending ? "Salvando..." : "Salvar templates"}
+              </Button>
             </CardContent>
           </Card>
 

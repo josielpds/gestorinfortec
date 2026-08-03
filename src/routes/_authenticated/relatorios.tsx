@@ -203,33 +203,130 @@ function Faturamento({ from, to }: { from: string; to: string }) {
 }
 
 function Movimentacoes({ from, to }: { from: string; to: string }) {
-  const { data = [] } = useQuery({
+  const [tipoFiltro, setTipoFiltro] = useState<"todos" | "mensalidades" | "entradas" | "saidas">("todos");
+
+  const { data: movData = [] } = useQuery({
     queryKey: ["rel-mov", from, to],
     queryFn: async () => ((await supabase.from("movimentacoes").select("*, clientes(nome)")
       .gte("data", from).lte("data", to).order("data", { ascending: false })).data ?? []) as any[],
   });
 
-  const entradas = data.filter((m: any) => m.tipo === "entrada").reduce((s, m) => s + Number(m.valor), 0);
-  const saidas = data.filter((m: any) => m.tipo === "saida").reduce((s, m) => s + Number(m.valor), 0);
+  const { data: cobData = [] } = useQuery({
+    queryKey: ["rel-cob-pagas", from, to],
+    queryFn: async () => ((await supabase.from("cobrancas").select("*, clientes(nome)").eq("status", "pago")
+      .gte("data_pagamento", from).lte("data_pagamento", to)).data ?? []) as any[],
+  });
+
+  const { data: contasPagasData = [] } = useQuery({
+    queryKey: ["rel-contas-pagas", from, to],
+    queryFn: async () => ((await supabase.from("contas_pagar").select("*").eq("status", "pago")
+      .gte("pago_em", from).lte("pago_em", to)).data ?? []) as any[],
+  });
+
+  const allItems = useMemo(() => {
+    const list: {
+      id: string;
+      data: string;
+      tipo: "entrada" | "saida";
+      origem: "mensalidade" | "entrada" | "saida";
+      origemRotulo: string;
+      descricao: string;
+      cliente: string;
+      valor: number;
+    }[] = [];
+
+    // General movimentacoes
+    movData.forEach((m: any) => {
+      list.push({
+        id: `mov-${m.id}`,
+        data: m.data,
+        tipo: m.tipo,
+        origem: m.tipo === "entrada" ? "entrada" : "saida",
+        origemRotulo: m.tipo === "entrada" ? "Entrada Geral" : "Saída Geral",
+        descricao: m.descricao,
+        cliente: m.clientes?.nome ?? "—",
+        valor: Number(m.valor),
+      });
+    });
+
+    // Paid subscriptions / charges
+    cobData.forEach((c: any) => {
+      list.push({
+        id: `cob-${c.id}`,
+        data: c.data_pagamento ?? c.vencimento,
+        tipo: "entrada",
+        origem: "mensalidade",
+        origemRotulo: "Mensalidade Recebida",
+        descricao: c.descricao,
+        cliente: c.clientes?.nome ?? "—",
+        valor: Number(c.valor),
+      });
+    });
+
+    // Paid bills/payables
+    contasPagasData.forEach((cp: any) => {
+      list.push({
+        id: `cp-${cp.id}`,
+        data: cp.pago_em ?? cp.vencimento,
+        tipo: "saida",
+        origem: "saida",
+        origemRotulo: "Despesa / Conta Paga",
+        descricao: cp.descricao,
+        cliente: cp.fornecedor ? `Fornecedor: ${cp.fornecedor}` : "—",
+        valor: Number(cp.valor),
+      });
+    });
+
+    return list.sort((a, b) => b.data.localeCompare(a.data));
+  }, [movData, cobData, contasPagasData]);
+
+  const filteredItems = useMemo(() => {
+    if (tipoFiltro === "todos") return allItems;
+    if (tipoFiltro === "mensalidades") return allItems.filter((i) => i.origem === "mensalidade");
+    if (tipoFiltro === "entradas") return allItems.filter((i) => i.tipo === "entrada");
+    if (tipoFiltro === "saidas") return allItems.filter((i) => i.tipo === "saida");
+    return allItems;
+  }, [allItems, tipoFiltro]);
+
+  const totalMensalidades = useMemo(() => allItems.filter((i) => i.origem === "mensalidade").reduce((s, i) => s + i.valor, 0), [allItems]);
+  const totalEntradas = useMemo(() => allItems.filter((i) => i.tipo === "entrada").reduce((s, i) => s + i.valor, 0), [allItems]);
+  const totalSaidas = useMemo(() => allItems.filter((i) => i.tipo === "saida").reduce((s, i) => s + i.valor, 0), [allItems]);
+  const saldo = totalEntradas - totalSaidas;
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="grid grid-cols-3 gap-4">
-        <StatBox label="Entradas" value={brl(entradas)} tone="success" icon={TrendingUp} />
-        <StatBox label="Saídas" value={brl(saidas)} tone="destructive" icon={TrendingDown} />
-        <StatBox label="Saldo" value={brl(entradas - saidas)} tone={entradas - saidas >= 0 ? "success" : "destructive"} icon={TrendingUp} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatBox label="Mensalidades Recebidas" value={brl(totalMensalidades)} tone="success" icon={TrendingUp} />
+        <StatBox label="Total Entradas" value={brl(totalEntradas)} tone="success" icon={TrendingUp} />
+        <StatBox label="Total Saídas" value={brl(totalSaidas)} tone="destructive" icon={TrendingDown} />
+        <StatBox label="Saldo no Período" value={brl(saldo)} tone={saldo >= 0 ? "success" : "destructive"} icon={TrendingUp} />
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button variant={tipoFiltro === "todos" ? "default" : "outline"} size="sm" onClick={() => setTipoFiltro("todos")}>
+          Todos os Lançamentos ({allItems.length})
+        </Button>
+        <Button variant={tipoFiltro === "mensalidades" ? "default" : "outline"} size="sm" onClick={() => setTipoFiltro("mensalidades")}>
+          Mensalidades Recebidas ({allItems.filter((i) => i.origem === "mensalidade").length})
+        </Button>
+        <Button variant={tipoFiltro === "entradas" ? "default" : "outline"} size="sm" onClick={() => setTipoFiltro("entradas")}>
+          Todas as Entradas ({allItems.filter((i) => i.tipo === "entrada").length})
+        </Button>
+        <Button variant={tipoFiltro === "saidas" ? "default" : "outline"} size="sm" onClick={() => setTipoFiltro("saidas")}>
+          Todas as Saídas ({allItems.filter((i) => i.tipo === "saida").length})
+        </Button>
       </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Extrato ({data.length})</CardTitle>
-          <Button variant="outline" size="sm" onClick={() => exportCSV("movimentacoes.csv", data.map((m: any) => ({
-            data: m.data, tipo: m.tipo, descricao: m.descricao, categoria: m.categoria ?? "",
-            cliente: m.clientes?.nome ?? "", valor: m.valor,
+          <CardTitle>Extrato de Lançamentos ({filteredItems.length})</CardTitle>
+          <Button variant="outline" size="sm" onClick={() => exportCSV("movimentacoes-e-recebimentos.csv", filteredItems.map((m) => ({
+            data: m.data, origem: m.origemRotulo, tipo: m.tipo, descricao: m.descricao,
+            cliente: m.cliente, valor: m.valor,
           })), [
-            { key: "data", label: "Data" }, { key: "tipo", label: "Tipo" },
-            { key: "descricao", label: "Descrição" }, { key: "categoria", label: "Categoria" },
-            { key: "cliente", label: "Cliente" }, { key: "valor", label: "Valor" },
+            { key: "data", label: "Data" }, { key: "origem", label: "Tipo de Lançamento" },
+            { key: "tipo", label: "Natureza" }, { key: "descricao", label: "Descrição" },
+            { key: "cliente", label: "Cliente/Fornecedor" }, { key: "valor", label: "Valor" },
           ])}><Download className="h-4 w-4 mr-2" /> Exportar CSV</Button>
         </CardHeader>
         <CardContent className="p-0">
@@ -237,29 +334,29 @@ function Movimentacoes({ from, to }: { from: string; to: string }) {
             <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
               <tr>
                 <th className="text-left px-4 py-3">Data</th>
-                <th className="text-left px-4 py-3">Tipo</th>
+                <th className="text-left px-4 py-3">Tipo / Origem</th>
                 <th className="text-left px-4 py-3">Descrição</th>
-                <th className="text-left px-4 py-3">Cliente</th>
+                <th className="text-left px-4 py-3">Cliente / Fornecedor</th>
                 <th className="text-right px-4 py-3">Valor</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {data.map((m: any) => (
+              {filteredItems.map((m) => (
                 <tr key={m.id} className="hover:bg-muted/30">
-                  <td className="px-4 py-3">{fmtDate(m.data)}</td>
+                  <td className="px-4 py-3 text-sm">{fmtDate(m.data)}</td>
                   <td className="px-4 py-3">
                     <Badge variant="outline" className={m.tipo === "entrada" ? "bg-success/15 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30"}>
-                      {m.tipo === "entrada" ? "Entrada" : "Saída"}
+                      {m.origemRotulo}
                     </Badge>
                   </td>
-                  <td className="px-4 py-3">{m.descricao}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{m.clientes?.nome ?? "—"}</td>
-                  <td className={"px-4 py-3 text-right font-semibold " + (m.tipo === "entrada" ? "text-success" : "text-destructive")}>
+                  <td className="px-4 py-3 text-sm">{m.descricao}</td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground">{m.cliente}</td>
+                  <td className={"px-4 py-3 text-right font-semibold text-sm " + (m.tipo === "entrada" ? "text-success" : "text-destructive")}>
                     {m.tipo === "entrada" ? "+" : "-"} {brl(m.valor)}
                   </td>
                 </tr>
               ))}
-              {data.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-muted-foreground">Nenhuma movimentação no período</td></tr>}
+              {filteredItems.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-muted-foreground">Nenhum recebimento ou lançamento encontrado no período</td></tr>}
             </tbody>
           </table>
         </CardContent>

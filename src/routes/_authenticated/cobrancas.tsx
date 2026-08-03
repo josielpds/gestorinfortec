@@ -24,6 +24,8 @@ export const Route = createFileRoute("/_authenticated/cobrancas")({
   component: CobrancasPage,
 });
 
+import { MonthFilter, formatMonthLabel } from "@/components/MonthFilter";
+
 type Cobranca = {
   id: string; cliente_id: string; descricao: string; valor: number;
   vencimento: string; status: string; data_pagamento: string | null;
@@ -39,6 +41,7 @@ function CobrancasPage() {
   const [editing, setEditing] = useState<Cobranca | null>(null);
   const [gerando, setGerando] = useState<Cobranca | null>(null);
   const [filter, setFilter] = useState<string>("todos");
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => todayISO().slice(0, 7));
   const [expandido, setExpandido] = useState<string | null>(null);
 
   const { data: cobrancas = [] } = useQuery({
@@ -198,7 +201,13 @@ function CobrancasPage() {
     );
   };
 
-  const filtered = cobrancas.filter((c) => {
+  const isMonthAll = selectedMonth === "todos";
+
+  const cobrancasDoMes = isMonthAll
+    ? cobrancas
+    : cobrancas.filter((c) => (c.vencimento ?? "").startsWith(selectedMonth) || (c.data_pagamento ?? "").startsWith(selectedMonth));
+
+  const filtered = cobrancasDoMes.filter((c) => {
     if (filter === "todos") return true;
     if (filter === "recorrente") return !!c.recorrente || !!c.origem_id;
     return effectiveStatus(c.vencimento, c.status) === filter;
@@ -213,27 +222,28 @@ function CobrancasPage() {
     grupos[idx.get(key)!].itens.push(c);
   }
 
-  const mes = todayISO().slice(0, 7);
-  const recebidoMes = cobrancas
-    .filter((c) => c.status === "pago" && (c.data_pagamento ?? c.vencimento).slice(0, 7) === mes)
+  const recebidoMes = cobrancasDoMes
+    .filter((c) => c.status === "pago")
     .reduce((s, c) => s + Number(c.valor), 0);
-  const aReceberMes = cobrancas
-    .filter((c) => c.status === "pendente" && c.vencimento.slice(0, 7) === mes)
+  const aReceberMes = cobrancasDoMes
+    .filter((c) => c.status === "pendente")
     .reduce((s, c) => s + Number(c.valor), 0);
   const previsao = cobrancas
-    .filter((c) => c.status === "pendente" && c.vencimento.slice(0, 7) > mes)
+    .filter((c) => c.status === "pendente" && (!isMonthAll ? c.vencimento.slice(0, 7) > selectedMonth : true))
     .reduce((s, c) => s + Number(c.valor), 0);
 
   const proximosMeses = (() => {
-    const out: { mes: string; total: number }[] = [];
-    const base = new Date(todayISO() + "T00:00:00");
+    const out: { key: string; mes: string; total: number }[] = [];
+    const baseYM = isMonthAll ? todayISO().slice(0, 7) : selectedMonth;
+    const [y, m] = baseYM.split("-").map(Number);
+    const base = new Date(y, m - 1, 1);
     for (let i = 1; i <= 6; i++) {
       const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const total = cobrancas
         .filter((c) => c.status === "pendente" && c.vencimento.slice(0, 7) === key)
         .reduce((s, c) => s + Number(c.valor), 0);
-      out.push({ mes: d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }), total });
+      out.push({ key, mes: d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }), total });
     }
     return out;
   })();
@@ -241,31 +251,42 @@ function CobrancasPage() {
   return (
     <AppLayout>
       <div className="p-8 max-w-[1400px]">
-        <PageHeader
-          title="Contas a Receber"
-          subtitle="Gerencie as cobranças e mensalidades dos seus clientes"
-          action={
-            <Dialog open={open} onOpenChange={setOpen}>
-              <DialogTrigger asChild><Button disabled={clientes.length === 0}><Plus className="h-4 w-4 mr-2" /> Nova Cobrança</Button></DialogTrigger>
-              <CobrancaForm clientes={clientes as any} categorias={categorias as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
-            </Dialog>
-          }
-        />
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+          <PageHeader
+            title="Contas a Receber"
+            subtitle={`Gerencie as cobranças e mensalidades dos seus clientes — ${formatMonthLabel(selectedMonth)}`}
+            action={
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild><Button disabled={clientes.length === 0}><Plus className="h-4 w-4 mr-2" /> Nova Cobrança</Button></DialogTrigger>
+                <CobrancaForm clientes={clientes as any} categorias={categorias as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
+              </Dialog>
+            }
+          />
+          <MonthFilter selectedMonth={selectedMonth} onChange={setSelectedMonth} allowAll={true} />
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-3 mb-6">
           <Card><CardContent className="p-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Recebido no mês</p>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Recebido no período</p>
             <p className="text-2xl font-bold text-success mt-1">{brl(recebidoMes)}</p>
           </CardContent></Card>
           <Card><CardContent className="p-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">A receber neste mês</p>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">A receber no período</p>
             <p className="text-2xl font-bold mt-1">{brl(aReceberMes)}</p>
           </CardContent></Card>
           <Card><CardContent className="p-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Previsão próximos meses</p>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">Previsão meses seguintes</p>
             <p className="text-2xl font-bold text-primary mt-1">{brl(previsao)}</p>
             <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
-              {proximosMeses.map((m) => <span key={m.mes}>{m.mes}: <span className="font-medium text-foreground">{brl(m.total)}</span></span>)}
+              {proximosMeses.map((m) => (
+                <button
+                  key={m.key}
+                  onClick={() => setSelectedMonth(m.key)}
+                  className="hover:underline text-left cursor-pointer"
+                >
+                  {m.mes}: <span className="font-medium text-foreground">{brl(m.total)}</span>
+                </button>
+              ))}
             </div>
           </CardContent></Card>
         </div>
