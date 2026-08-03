@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 
-const TABELAS = ["clientes", "cobrancas", "movimentacoes", "categorias", "configuracoes", "profiles"] as const;
+const TABELAS = ["clientes", "cobrancas", "contas_pagar", "movimentacoes", "categorias", "configuracoes", "profiles"] as const;
 
 /** Baixa um JSON com todos os dados do usuário autenticado. */
 export async function baixarBackupCompleto() {
