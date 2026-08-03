@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { currentUserId } from "@/hooks/useCurrentUser";
 import { baixarBackupCompleto } from "@/lib/backup";
+import { CategoriasCard } from "@/components/CategoriasCard";
 import { Download, KeyRound } from "lucide-react";
 
 export const Route = createFileRoute("/_authenticated/configuracoes")({
@@ -120,6 +121,10 @@ function ConfigPage() {
               </div>
             </CardContent>
           </Card>
+
+          <CategoriasCard />
+
+
 
           <Card>
             <CardHeader>

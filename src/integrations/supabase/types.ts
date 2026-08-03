@@ -177,11 +177,57 @@ export type Database = {
         }
         Relationships: []
       }
+      contas_pagar: {
+        Row: {
+          categoria: string | null
+          created_at: string
+          descricao: string
+          fornecedor: string | null
+          id: string
+          observacoes: string | null
+          pago_em: string | null
+          status: string
+          updated_at: string
+          user_id: string
+          valor: number
+          vencimento: string
+        }
+        Insert: {
+          categoria?: string | null
+          created_at?: string
+          descricao: string
+          fornecedor?: string | null
+          id?: string
+          observacoes?: string | null
+          pago_em?: string | null
+          status?: string
+          updated_at?: string
+          user_id: string
+          valor?: number
+          vencimento: string
+        }
+        Update: {
+          categoria?: string | null
+          created_at?: string
+          descricao?: string
+          fornecedor?: string | null
+          id?: string
+          observacoes?: string | null
+          pago_em?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string
+          valor?: number
+          vencimento?: string
+        }
+        Relationships: []
+      }
       movimentacoes: {
         Row: {
           categoria: string | null
           cliente_id: string | null
           cobranca_id: string | null
+          conta_pagar_id: string | null
           created_at: string
           data: string
           descricao: string
@@ -194,6 +240,7 @@ export type Database = {
           categoria?: string | null
           cliente_id?: string | null
           cobranca_id?: string | null
+          conta_pagar_id?: string | null
           created_at?: string
           data?: string
           descricao: string
@@ -206,6 +253,7 @@ export type Database = {
           categoria?: string | null
           cliente_id?: string | null
           cobranca_id?: string | null
+          conta_pagar_id?: string | null
           created_at?: string
           data?: string
           descricao?: string
@@ -227,6 +275,13 @@ export type Database = {
             columns: ["cobranca_id"]
             isOneToOne: false
             referencedRelation: "cobrancas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "movimentacoes_conta_pagar_id_fkey"
+            columns: ["conta_pagar_id"]
+            isOneToOne: false
+            referencedRelation: "contas_pagar"
             referencedColumns: ["id"]
           },
         ]
