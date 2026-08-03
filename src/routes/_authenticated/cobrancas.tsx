@@ -20,7 +20,7 @@ import { waLink, renderTemplate } from "@/lib/whatsapp";
 import { FREQ_LABEL, gerarDatas } from "@/lib/recorrencia";
 
 export const Route = createFileRoute("/_authenticated/cobrancas")({
-  head: () => ({ meta: [{ title: "Cobranças — CobraZap" }, { name: "description", content: "Cadastro e gestão de cobranças." }] }),
+  head: () => ({ meta: [{ title: "Contas a Receber — CobraZap" }, { name: "description", content: "Cadastro e gestão das contas a receber dos seus clientes." }] }),
   component: CobrancasPage,
 });
 
@@ -242,8 +242,8 @@ function CobrancasPage() {
     <AppLayout>
       <div className="p-8 max-w-[1400px]">
         <PageHeader
-          title="Cobranças"
-          subtitle="Gerencie as cobranças dos seus clientes"
+          title="Contas a Receber"
+          subtitle="Gerencie as cobranças e mensalidades dos seus clientes"
           action={
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild><Button disabled={clientes.length === 0}><Plus className="h-4 w-4 mr-2" /> Nova Cobrança</Button></DialogTrigger>

@@ -1,5 +1,5 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Users, Receipt, MessageCircle, BarChart3, Settings, Zap, Wallet, Tags, LogOut, ShieldCheck, Lock } from "lucide-react";
+import { LayoutDashboard, Users, Receipt, MessageCircle, BarChart3, Settings, Zap, Wallet, FileMinus, LogOut, ShieldCheck, Lock } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,9 +12,9 @@ import { Button } from "@/components/ui/button";
 const nav = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/clientes", label: "Clientes", icon: Users },
-  { to: "/cobrancas", label: "Cobranças", icon: Receipt },
-  { to: "/movimentacoes", label: "Movimentações", icon: Wallet },
-  { to: "/categorias", label: "Categorias", icon: Tags },
+  { to: "/cobrancas", label: "Contas a Receber", icon: Receipt },
+  { to: "/contas-a-pagar", label: "Contas a Pagar", icon: FileMinus },
+  { to: "/movimentacoes", label: "Lançamentos de Entradas e Saídas", icon: Wallet },
   { to: "/mensagens", label: "Disparar Mensagens", icon: MessageCircle },
   { to: "/relatorios", label: "Relatórios", icon: BarChart3 },
   { to: "/configuracoes", label: "Configurações", icon: Settings },

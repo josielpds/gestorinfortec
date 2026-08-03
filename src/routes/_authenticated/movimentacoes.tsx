@@ -18,7 +18,7 @@ import { currentUserId } from "@/hooks/useCurrentUser";
 
 export const Route = createFileRoute("/_authenticated/movimentacoes")({
   head: () => ({ meta: [
-    { title: "Movimentações — CobraZap" },
+    { title: "Lançamentos de Entradas e Saídas — CobraZap" },
     { name: "description", content: "Lance entradas e despesas manualmente e acompanhe seu saldo." },
   ] }),
   component: MovimentacoesPage,
@@ -78,8 +78,8 @@ function MovimentacoesPage() {
     <AppLayout>
       <div className="p-8 max-w-[1400px]">
         <PageHeader
-          title="Movimentações"
-          subtitle="Lance entradas e despesas manuais. Cobranças pagas viram entradas automaticamente."
+          title="Lançamentos de Entradas e Saídas"
+          subtitle="Lance entradas e despesas manuais. Contas recebidas e pagas viram lançamentos automaticamente."
           action={
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> Novo lançamento</Button></DialogTrigger>
