@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Zap } from "lucide-react";
+import { Captcha, checkCaptcha } from "@/components/Captcha";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -74,6 +75,8 @@ function LoginForm() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [captcha, setCaptcha] = useState("");
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
   const [loading, setLoading] = useState(false);
   const [recuperando, setRecuperando] = useState(false);
 
@@ -81,6 +84,7 @@ function LoginForm() {
     e.preventDefault();
     const parsed = loginSchema.safeParse({ email, password });
     if (!parsed.success) { toast.error(parsed.error.issues[0].message); return; }
+    if (!checkCaptcha(captchaAnswer, captcha)) { toast.error("Verificação de segurança incorreta"); return; }
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword(parsed.data);
     setLoading(false);
@@ -105,6 +109,7 @@ function LoginForm() {
     <form onSubmit={submit} className="space-y-4 mt-4">
       <div><Label>Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required /></div>
       <div><Label>Senha</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required /></div>
+      <Captcha value={captcha} onChange={setCaptcha} onAnswer={setCaptchaAnswer} />
       <Button className="w-full" disabled={loading}>{loading ? "Entrando..." : "Entrar"}</Button>
       <Button type="button" variant="link" className="w-full h-auto p-0 text-sm" disabled={recuperando} onClick={recuperar}>
         {recuperando ? "Enviando link..." : "Esqueci minha senha"}
@@ -117,12 +122,15 @@ function LoginForm() {
 function SignupForm() {
   const navigate = useNavigate();
   const [form, setForm] = useState({ nome: "", empresa: "", email: "", password: "" });
+  const [captcha, setCaptcha] = useState("");
+  const [captchaAnswer, setCaptchaAnswer] = useState("");
   const [loading, setLoading] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsed = signupSchema.safeParse(form);
     if (!parsed.success) { toast.error(parsed.error.issues[0].message); return; }
+    if (!checkCaptcha(captchaAnswer, captcha)) { toast.error("Verificação de segurança incorreta"); return; }
     setLoading(true);
     const { data, error } = await supabase.auth.signUp({
       email: parsed.data.email,
@@ -148,6 +156,7 @@ function SignupForm() {
       <div><Label>Empresa</Label><Input value={form.empresa} onChange={(e) => setForm({ ...form, empresa: e.target.value })} /></div>
       <div><Label>Email *</Label><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} autoComplete="email" required /></div>
       <div><Label>Senha *</Label><Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" required minLength={6} /></div>
+      <Captcha value={captcha} onChange={setCaptcha} onAnswer={setCaptchaAnswer} />
       <Button className="w-full" disabled={loading}>{loading ? "Criando..." : "Criar conta"}</Button>
     </form>
   );
