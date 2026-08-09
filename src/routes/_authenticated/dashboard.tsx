@@ -26,15 +26,17 @@ export function Dashboard() {
   const { data } = useQuery({
     queryKey: ["dashboard-data"],
     queryFn: async () => {
-      const [clientesRes, cobrancasRes, contasPagarRes] = await Promise.all([
+      const [clientesRes, cobrancasRes, contasPagarRes, movRes] = await Promise.all([
         supabase.from("clientes").select("id, ativo"),
         supabase.from("cobrancas").select("id, cliente_id, descricao, valor, vencimento, status, data_pagamento, clientes(nome)").order("vencimento"),
         supabase.from("contas_pagar").select("id, descricao, fornecedor, valor, vencimento, status, pago_em, categoria").order("vencimento"),
+        supabase.from("movimentacoes").select("tipo, valor, status"),
       ]);
       return {
         clientes: clientesRes.data ?? [],
         cobrancas: (cobrancasRes.data ?? []) as any[],
         contasPagar: (contasPagarRes.data ?? []) as any[],
+        movimentacoes: (movRes.data ?? []) as any[],
       };
     },
   });
@@ -42,6 +44,7 @@ export function Dashboard() {
   const clientes = data?.clientes ?? [];
   const cobrancas = data?.cobrancas ?? [];
   const contasPagar = data?.contasPagar ?? [];
+  const movimentacoes = data?.movimentacoes ?? [];
 
   const isAll = selectedMonth === "todos";
 
@@ -81,6 +84,11 @@ export function Dashboard() {
   // Overdue
   const emAtrasoReceber = cobrancas.filter((c) => effectiveStatus(c.vencimento, c.status) === "atrasado").reduce((s, c) => s + Number(c.valor), 0);
   const emAtrasoPagar = contasPagar.filter((cp) => cp.status === "pendente" && cp.vencimento < today).reduce((s, cp) => s + Number(cp.valor), 0);
+
+  // Pending receivables from movimentações
+  const pendenteReceber = movimentacoes
+    .filter((m) => m.tipo === "entrada" && m.status === "pendente")
+    .reduce((s, m) => s + Number(m.valor), 0);
 
   const atrasadas = cobrancas.filter((c) => effectiveStatus(c.vencimento, c.status) === "atrasado");
   const vencemHoje = cobrancas.filter((c) => c.status === "pendente" && c.vencimento === today);
@@ -151,6 +159,13 @@ export function Dashboard() {
             subtext={!isAll ? `Total acumulado: ${brl(aPagarTotal)}` : undefined}
             icon={ArrowUpRight}
             tone="warning"
+          />
+          <StatCard
+            label="Pendente a Receber"
+            value={brl(pendenteReceber)}
+            subtext="Lançamentos de entrada em aberto"
+            icon={Clock}
+            tone="destructive"
           />
           <StatCard
             label="Recebido (Mês)"

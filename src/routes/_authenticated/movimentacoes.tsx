@@ -27,6 +27,7 @@ export const Route = createFileRoute("/_authenticated/movimentacoes")({
 type Mov = {
   id: string; tipo: "entrada" | "saida"; valor: number; descricao: string;
   categoria: string | null; data: string; cliente_id: string | null; cobranca_id: string | null;
+  status: "pago" | "pendente"; conta_pagar_id: string | null;
   clientes?: { nome: string } | null;
 };
 
@@ -70,9 +71,21 @@ function MovimentacoesPage() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const toggleStatus = useMutation({
+    mutationFn: async (m: Mov) => {
+      const novo = m.status === "pago" ? "pendente" : "pago";
+      const { error } = await supabase.from("movimentacoes").update({ status: novo }).eq("id", m.id);
+      if (error) throw error;
+    },
+    onSuccess: () => { toast.success("Situação atualizada"); qc.invalidateQueries(); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const filtered = movs.filter((m) => filter === "todos" ? true : m.tipo === filter);
-  const entradas = movs.filter((m) => m.tipo === "entrada").reduce((s, m) => s + Number(m.valor), 0);
-  const saidas = movs.filter((m) => m.tipo === "saida").reduce((s, m) => s + Number(m.valor), 0);
+  const entradas = movs.filter((m) => m.tipo === "entrada" && m.status === "pago").reduce((s, m) => s + Number(m.valor), 0);
+  const saidas = movs.filter((m) => m.tipo === "saida" && m.status === "pago").reduce((s, m) => s + Number(m.valor), 0);
+  const pendenteReceber = movs.filter((m) => m.tipo === "entrada" && m.status === "pendente").reduce((s, m) => s + Number(m.valor), 0);
+  const pendentePagar = movs.filter((m) => m.tipo === "saida" && m.status === "pendente").reduce((s, m) => s + Number(m.valor), 0);
 
   return (
     <AppLayout>
@@ -88,10 +101,12 @@ function MovimentacoesPage() {
           }
         />
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <SummaryCard label="Entradas" value={brl(entradas)} tone="success" icon={TrendingUp} />
-          <SummaryCard label="Saídas" value={brl(saidas)} tone="destructive" icon={TrendingDown} />
-          <SummaryCard label="Saldo" value={brl(entradas - saidas)} tone={entradas - saidas >= 0 ? "success" : "destructive"} icon={TrendingUp} />
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+          <SummaryCard label="Entradas recebidas" value={brl(entradas)} tone="success" icon={TrendingUp} />
+          <SummaryCard label="Saídas pagas" value={brl(saidas)} tone="destructive" icon={TrendingDown} />
+          <SummaryCard label="Pendente a receber" value={brl(pendenteReceber)} tone="info" icon={TrendingUp} />
+          <SummaryCard label="Pendente a pagar" value={brl(pendentePagar)} tone="warning" icon={TrendingDown} />
+          <SummaryCard label="Saldo realizado" value={brl(entradas - saidas)} tone={entradas - saidas >= 0 ? "success" : "destructive"} icon={TrendingUp} />
         </div>
 
         <div className="flex gap-2 mb-4">
@@ -114,6 +129,7 @@ function MovimentacoesPage() {
                     <th className="text-left px-4 py-3">Tipo</th>
                     <th className="text-left px-4 py-3">Descrição</th>
                     <th className="text-left px-4 py-3">Categoria</th>
+                    <th className="text-left px-4 py-3">Situação</th>
                     <th className="text-right px-4 py-3">Valor</th>
                     <th className="text-right px-4 py-3">Ações</th>
                   </tr>
@@ -129,6 +145,20 @@ function MovimentacoesPage() {
                       </td>
                       <td className="px-4 py-3">{m.descricao}{m.clientes?.nome ? <span className="text-muted-foreground"> · {m.clientes.nome}</span> : null}</td>
                       <td className="px-4 py-3 text-muted-foreground">{m.categoria ?? "—"}</td>
+                      <td className="px-4 py-3">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title={m.cobranca_id || m.conta_pagar_id ? "Vinculado a cobrança/conta" : "Clique para alternar pago/pendente"}
+                          onClick={() => {
+                            if (m.cobranca_id || m.conta_pagar_id) return;
+                            toggleStatus.mutate(m);
+                          }}
+                          className="h-auto p-0"
+                        >
+                          <StatusBadge status={m.status} />
+                        </Button>
+                      </td>
                       <td className={"px-4 py-3 text-right font-semibold " + (m.tipo === "entrada" ? "text-success" : "text-destructive")}>
                         {m.tipo === "entrada" ? "+" : "-"} {brl(m.valor)}
                       </td>
@@ -150,7 +180,7 @@ function MovimentacoesPage() {
 }
 
 function MovForm({ categorias, onSubmit, loading }: { categorias: any[]; onSubmit: (p: any) => void; loading: boolean }) {
-  const [form, setForm] = useState({ tipo: "saida" as "entrada" | "saida", valor: "", descricao: "", categoria: "", data: todayISO(), observacoes: "" });
+  const [form, setForm] = useState({ tipo: "saida" as "entrada" | "saida", status: "pago" as "pago" | "pendente", valor: "", descricao: "", categoria: "", data: todayISO(), observacoes: "" });
   const catsFiltradas = categorias.filter((c) => c.tipo === form.tipo);
   return (
     <DialogContent>
@@ -180,12 +210,23 @@ function MovForm({ categorias, onSubmit, loading }: { categorias: any[]; onSubmi
             </SelectContent>
           </Select>
         </div>
+        <div>
+          <Label>Situação *</Label>
+          <Select value={form.status} onValueChange={(v: "pago" | "pendente") => setForm({ ...form, status: v })}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pago">Pago</SelectItem>
+              <SelectItem value="pendente">Pendente</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div><Label>Observações</Label><Textarea rows={2} value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} maxLength={500} /></div>
       </div>
       <DialogFooter>
         <Button disabled={loading || !form.descricao || !form.valor}
           onClick={() => onSubmit({
             tipo: form.tipo,
+            status: form.status,
             valor: parseFloat(form.valor),
             descricao: form.descricao,
             data: form.data,
@@ -198,10 +239,24 @@ function MovForm({ categorias, onSubmit, loading }: { categorias: any[]; onSubmi
   );
 }
 
+function StatusBadge({ status }: { status: "pago" | "pendente" }) {
+  return (
+    <Badge variant="outline" className={
+      status === "pago"
+        ? "bg-success/15 text-success border-success/30"
+        : "bg-warning/15 text-warning-foreground border-warning/30"
+    }>
+      {status === "pago" ? "Pago" : "Pendente"}
+    </Badge>
+  );
+}
+
 function SummaryCard({ label, value, tone, icon: Icon }: any) {
   const tc: any = {
     success: "text-success bg-success/10",
     destructive: "text-destructive bg-destructive/10",
+    info: "text-info bg-info/10",
+    warning: "text-warning-foreground bg-warning/15",
   };
   return (
     <Card>
