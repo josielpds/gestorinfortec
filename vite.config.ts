@@ -10,6 +10,11 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
+  // GitHub Pages is static-only hosting: skip the Nitro/Cloudflare build
+  // (which emits .output/server and no index.html). With nitro off,
+  // TanStack Start writes client + server to dist and prerenders the
+  // static HTML for every route, which is what gets published.
+  nitro: false,
   // Custom domain at the apex: base is "/".
   base: "/",
   build: {
