@@ -11,8 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Upload } from "lucide-react";
 import { toast } from "sonner";
+import { BulkImportDialog } from "@/components/BulkImportDialog";
 
 export const Route = createFileRoute("/_authenticated/clientes")({
   head: () => ({ meta: [{ title: "Clientes — CobraZap" }, { name: "description", content: "Cadastro e gestão de clientes." }] }),
@@ -29,6 +30,7 @@ function ClientesPage() {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Cliente | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const { data: clientes = [] } = useQuery({
     queryKey: ["clientes"],
@@ -68,6 +70,43 @@ function ClientesPage() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const bulkImport = useMutation({
+    mutationFn: async (valid: { nome: string; telefone: string }[]) => {
+      const user_id = await currentUserId();
+      const rows = valid.map((c) => ({ ...c, user_id }));
+      const { error } = await supabase.from("clientes").insert(rows);
+      if (error) throw error;
+      return valid.length;
+    },
+    onSuccess: (n) => {
+      toast.success(`${n} cliente(s) importado(s)`);
+      qc.invalidateQueries({ queryKey: ["clientes"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      setImportOpen(false);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const parseClientes = (rows: string[][]) => {
+    const skipHeader = rows[0]?.[0]?.toLowerCase().includes("nome");
+    const data = skipHeader ? rows.slice(1) : rows;
+    const valid: any[] = [];
+    let skipped = 0;
+    for (const r of data) {
+      const nome = (r[0] ?? "").trim();
+      const telefone = (r[1] ?? "").trim();
+      if (!nome || !telefone) { skipped++; continue; }
+      valid.push({
+        nome,
+        telefone,
+        email: (r[2] ?? "").trim() || null,
+        documento: (r[3] ?? "").trim() || null,
+        observacoes: (r[4] ?? "").trim() || null,
+      });
+    }
+    return { valid, skipped };
+  };
+
   const filtered = clientes.filter((c) =>
     (c.nome + " " + c.telefone + " " + (c.email ?? "")).toLowerCase().includes(search.toLowerCase())
   );
@@ -79,10 +118,31 @@ function ClientesPage() {
           title="Clientes"
           subtitle="Gerencie seus clientes cadastrados"
           action={
-            <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null); }}>
-              <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> Novo Cliente</Button></DialogTrigger>
-              <ClienteFormDialog editing={editing} onSubmit={(p) => save.mutate(p)} loading={save.isPending} />
-            </Dialog>
+            <div className="flex gap-2">
+              <Dialog open={importOpen} onOpenChange={setImportOpen}>
+                <DialogTrigger asChild><Button variant="outline"><Upload className="h-4 w-4 mr-2" /> Importar em massa</Button></DialogTrigger>
+                <BulkImportDialog
+                  title="Importar clientes em massa"
+                  description="Baixe o modelo, preencha com seus clientes e importe, ou cole o conteúdo abaixo (uma linha por cliente, separado por ponto e vírgula)."
+                  templateName="clientes-modelo.csv"
+                  columns={[
+                    { key: "nome", label: "nome", example: "MERCADINHO CANARIO" },
+                    { key: "telefone", label: "telefone", example: "(11) 98888-7777" },
+                    { key: "email", label: "email", example: "contato@exemplo.com" },
+                    { key: "documento", label: "documento", example: "123.456.789-00" },
+                    { key: "observacoes", label: "observacoes", example: "Cliente desde 2024" },
+                  ]}
+                  parse={parseClientes}
+                  onSubmit={(rows) => bulkImport.mutate(rows)}
+                  loading={bulkImport.isPending}
+                  itemLabel="cliente"
+                />
+              </Dialog>
+              <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null); }}>
+                <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> Novo Cliente</Button></DialogTrigger>
+                <ClienteFormDialog editing={editing} onSubmit={(p) => save.mutate(p)} loading={save.isPending} />
+              </Dialog>
+            </div>
           }
         />
 

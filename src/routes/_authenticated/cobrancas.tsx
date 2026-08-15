@@ -12,12 +12,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Check, Send, Repeat, Pencil, CalendarPlus, CircleSlash, ChevronRight, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Check, Send, Repeat, Pencil, CalendarPlus, CircleSlash, ChevronRight, ChevronDown, Upload } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { brl, fmtDate, effectiveStatus, todayISO } from "@/lib/format";
 import { waLink, renderTemplate } from "@/lib/whatsapp";
 import { FREQ_LABEL, gerarDatas } from "@/lib/recorrencia";
+import { BulkImportDialog } from "@/components/BulkImportDialog";
+import { parseDelimited, parseValor } from "@/lib/import";
 
 export const Route = createFileRoute("/_authenticated/cobrancas")({
   head: () => ({ meta: [{ title: "Contas a Receber — CobraZap" }, { name: "description", content: "Cadastro e gestão das contas a receber dos seus clientes." }] }),
@@ -43,6 +45,7 @@ function CobrancasPage() {
   const [filter, setFilter] = useState<string>("todos");
   const [selectedMonth, setSelectedMonth] = useState<string>(() => todayISO().slice(0, 7));
   const [expandido, setExpandido] = useState<string | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const { data: cobrancas = [] } = useQuery({
     queryKey: ["cobrancas"],
@@ -78,6 +81,54 @@ function CobrancasPage() {
     onSuccess: () => { toast.success("Cobrança criada"); qc.invalidateQueries(); setOpen(false); },
     onError: (e: any) => toast.error(e.message),
   });
+
+  const bulkImport = useMutation({
+    mutationFn: async (rows: any[]) => {
+      const user_id = await currentUserId();
+      const { error } = await supabase.from("cobrancas").insert(rows.map((r) => ({ ...r, user_id })));
+      if (error) throw error;
+      return rows.length;
+    },
+    onSuccess: (n) => {
+      toast.success(`${n} cobrança(s) importada(s)`);
+      qc.invalidateQueries();
+      setImportOpen(false);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const parseCobrancas = (rows: string[][]) => {
+    const skipHeader = rows[0]?.[0]?.toLowerCase().includes("cliente");
+    const data = skipHeader ? rows.slice(1) : rows;
+    const clienteById = new Map<string, string>();
+    for (const c of clientes) clienteById.set(c.nome.trim().toLowerCase(), c.id);
+    const catById = new Map<string, string>();
+    for (const c of categorias) catById.set(c.nome.trim().toLowerCase(), c.id);
+    const valid: any[] = [];
+    let skipped = 0;
+    for (const r of data) {
+      const clienteNome = (r[0] ?? "").trim();
+      const descricao = (r[1] ?? "").trim();
+      const valor = parseValor(r[2] ?? "");
+      const vencimento = (r[3] ?? "").trim();
+      const categoriaNome = (r[4] ?? "").trim();
+      const observacoes = (r[5] ?? "").trim();
+      const cliente_id = clienteById.get(clienteNome.toLowerCase());
+      if (!cliente_id || !descricao || valor === null || valor <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(vencimento)) {
+        skipped++;
+        continue;
+      }
+      valid.push({
+        cliente_id,
+        descricao,
+        valor,
+        vencimento,
+        categoria_id: catById.get(categoriaNome.toLowerCase()) ?? null,
+        observacoes: observacoes || null,
+      });
+    }
+    return { valid, skipped };
+  };
 
   const update = useMutation({
     mutationFn: async ({ id, ...p }: any) => {
@@ -256,10 +307,32 @@ function CobrancasPage() {
             title="Contas a Receber"
             subtitle={`Gerencie as cobranças e mensalidades dos seus clientes — ${formatMonthLabel(selectedMonth)}`}
             action={
-              <Dialog open={open} onOpenChange={setOpen}>
-                <DialogTrigger asChild><Button disabled={clientes.length === 0}><Plus className="h-4 w-4 mr-2" /> Nova Cobrança</Button></DialogTrigger>
-                <CobrancaForm clientes={clientes as any} categorias={categorias as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
-              </Dialog>
+              <div className="flex gap-2">
+                <Dialog open={importOpen} onOpenChange={setImportOpen}>
+                  <DialogTrigger asChild><Button variant="outline" disabled={clientes.length === 0}><Upload className="h-4 w-4 mr-2" /> Importar em massa</Button></DialogTrigger>
+                  <BulkImportDialog
+                    title="Importar cobranças em massa"
+                    description="Baixe o modelo, preencha com suas cobranças e importe. O cliente e a categoria devem existir no sistema (serão buscados pelo nome)."
+                    templateName="cobrancas-modelo.csv"
+                    columns={[
+                      { key: "cliente", label: "cliente", example: "MERCADINHO CANARIO" },
+                      { key: "descricao", label: "descricao", example: "Mensalidade" },
+                      { key: "valor", label: "valor", example: "150,00" },
+                      { key: "vencimento", label: "vencimento", example: "2026-08-15" },
+                      { key: "categoria", label: "categoria", example: "Mensalidade" },
+                      { key: "observacoes", label: "observacoes", example: "" },
+                    ]}
+                    parse={parseCobrancas}
+                    onSubmit={(rows) => bulkImport.mutate(rows)}
+                    loading={bulkImport.isPending}
+                    itemLabel="cobrança"
+                  />
+                </Dialog>
+                <Dialog open={open} onOpenChange={setOpen}>
+                  <DialogTrigger asChild><Button disabled={clientes.length === 0}><Plus className="h-4 w-4 mr-2" /> Nova Cobrança</Button></DialogTrigger>
+                  <CobrancaForm clientes={clientes as any} categorias={categorias as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
+                </Dialog>
+              </div>
             }
           />
           <MonthFilter selectedMonth={selectedMonth} onChange={setSelectedMonth} allowAll={true} />
