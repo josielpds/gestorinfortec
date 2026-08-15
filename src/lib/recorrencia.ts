@@ -39,3 +39,22 @@ export const gerarDatas = (iso: string, freq: string, qtd: number, limite?: stri
   }
   return out;
 };
+
+/** Data do vencimento da N-ésima cobrança (contando a primeira como 1). */
+export const quantidadeParaFim = (iso: string, freq: string, qtd: number): string => {
+  if (qtd <= 1) return iso;
+  const datas = gerarDatas(iso, freq, qtd - 1);
+  return datas[datas.length - 1];
+};
+
+/** Quantas cobranças cabem da data inicial até a data limite (inclusive). */
+export const fimParaQuantidade = (iso: string, freq: string, fim: string): number => {
+  let count = 1;
+  let atual = iso;
+  while (true) {
+    atual = proximaData(atual, freq);
+    if (atual > fim) break;
+    count++;
+  }
+  return count;
+};

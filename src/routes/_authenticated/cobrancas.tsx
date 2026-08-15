@@ -17,7 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { brl, fmtDate, effectiveStatus, todayISO } from "@/lib/format";
 import { waLink, renderTemplate } from "@/lib/whatsapp";
-import { FREQ_LABEL, gerarDatas } from "@/lib/recorrencia";
+import { FREQ_LABEL, gerarDatas, quantidadeParaFim, fimParaQuantidade } from "@/lib/recorrencia";
 import { BulkImportDialog } from "@/components/BulkImportDialog";
 import { parseDelimited, parseValor } from "@/lib/import";
 
@@ -113,11 +113,16 @@ function CobrancasPage() {
       const vencimento = (r[3] ?? "").trim();
       const categoriaNome = (r[4] ?? "").trim();
       const observacoes = (r[5] ?? "").trim();
+      const frequencia = (r[6] ?? "").trim().toLowerCase();
+      const qtd = parseInt((r[7] ?? "").trim(), 10) || 0;
       const cliente_id = clienteById.get(clienteNome.toLowerCase());
       if (!cliente_id || !descricao || valor === null || valor <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(vencimento)) {
         skipped++;
         continue;
       }
+      if (frequencia && !FREQ_LABEL[frequencia]) { skipped++; continue; }
+      const recorrente = !!frequencia;
+      const fim = recorrente && qtd > 0 ? quantidadeParaFim(vencimento, frequencia, qtd) : null;
       valid.push({
         cliente_id,
         descricao,
@@ -125,6 +130,9 @@ function CobrancasPage() {
         vencimento,
         categoria_id: catById.get(categoriaNome.toLowerCase()) ?? null,
         observacoes: observacoes || null,
+        recorrente,
+        frequencia: frequencia || null,
+        recorrencia_fim: fim,
       });
     }
     return { valid, skipped };
@@ -312,7 +320,7 @@ function CobrancasPage() {
                   <DialogTrigger asChild><Button variant="outline" disabled={clientes.length === 0}><Upload className="h-4 w-4 mr-2" /> Importar em massa</Button></DialogTrigger>
                   <BulkImportDialog
                     title="Importar cobranças em massa"
-                    description="Baixe o modelo, preencha com suas cobranças e importe. O cliente e a categoria devem existir no sistema (serão buscados pelo nome)."
+                    description="Baixe o modelo, preencha com suas cobranças e importe. O cliente e a categoria devem existir no sistema (serão buscados pelo nome). Preencha frequencia e quantidade para criar uma mensalidade/recorrência."
                     templateName="cobrancas-modelo.csv"
                     columns={[
                       { key: "cliente", label: "cliente", example: "MERCADINHO CANARIO" },
@@ -321,6 +329,8 @@ function CobrancasPage() {
                       { key: "vencimento", label: "vencimento", example: "2026-08-15" },
                       { key: "categoria", label: "categoria", example: "Mensalidade" },
                       { key: "observacoes", label: "observacoes", example: "" },
+                      { key: "frequencia", label: "frequencia", example: "mensal" },
+                      { key: "quantidade", label: "quantidade", example: "12" },
                     ]}
                     parse={parseCobrancas}
                     onSubmit={(rows) => bulkImport.mutate(rows)}
@@ -533,6 +543,9 @@ function CobrancaForm({ clientes, categorias, onSubmit, loading, initial }: { cl
     recorrente: initial?.recorrente ?? false,
     frequencia: initial?.frequencia ?? "mensal",
     recorrencia_fim: initial?.recorrencia_fim ?? "",
+    recorrencia_qtd: initial?.recorrencia_fim
+      ? String(fimParaQuantidade(initial.vencimento, initial.frequencia ?? "mensal", initial.recorrencia_fim))
+      : "",
   });
   return (
     <DialogContent>
@@ -585,8 +598,11 @@ function CobrancaForm({ clientes, categorias, onSubmit, loading, initial }: { cl
                 </Select>
               </div>
               <div>
-                <Label>Repetir até (opcional)</Label>
-                <Input type="date" value={form.recorrencia_fim} onChange={(e) => setForm({ ...form, recorrencia_fim: e.target.value })} />
+                <Label>Quantidade de cobranças</Label>
+                <Input type="number" min={1} max={120}
+                  placeholder="Ex.: 12 (vazia = sem limite)"
+                  value={form.recorrencia_qtd}
+                  onChange={(e) => setForm({ ...form, recorrencia_qtd: e.target.value })} />
               </div>
             </div>
           )}
@@ -596,17 +612,23 @@ function CobrancaForm({ clientes, categorias, onSubmit, loading, initial }: { cl
       </div>
       <DialogFooter>
         <Button disabled={loading || !form.cliente_id || !form.descricao || !form.valor}
-          onClick={() => onSubmit({
-            cliente_id: form.cliente_id,
-            descricao: form.descricao,
-            observacoes: form.observacoes,
-            vencimento: form.vencimento,
-            valor: parseFloat(form.valor),
-            categoria_id: form.categoria_id || null,
-            recorrente: form.recorrente,
-            frequencia: form.recorrente ? form.frequencia : null,
-            recorrencia_fim: form.recorrente && form.recorrencia_fim ? form.recorrencia_fim : null,
-          })}>
+          onClick={() => {
+            const qtd = parseInt(form.recorrencia_qtd, 10);
+            const fim = form.recorrente && qtd > 0
+              ? quantidadeParaFim(form.vencimento, form.frequencia, qtd)
+              : form.recorrencia_fim || null;
+            onSubmit({
+              cliente_id: form.cliente_id,
+              descricao: form.descricao,
+              observacoes: form.observacoes,
+              vencimento: form.vencimento,
+              valor: parseFloat(form.valor),
+              categoria_id: form.categoria_id || null,
+              recorrente: form.recorrente,
+              frequencia: form.recorrente ? form.frequencia : null,
+              recorrencia_fim: fim,
+            });
+          }}>
           {loading ? "Salvando..." : initial ? "Salvar alterações" : "Criar cobrança"}
         </Button>
       </DialogFooter>
