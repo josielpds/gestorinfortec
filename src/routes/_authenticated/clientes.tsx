@@ -91,11 +91,14 @@ function ClientesPage() {
     const skipHeader = rows[0]?.[0]?.toLowerCase().includes("nome");
     const data = skipHeader ? rows.slice(1) : rows;
     const valid: any[] = [];
-    let skipped = 0;
-    for (const r of data) {
+    const reasons: string[] = [];
+    for (let i = 0; i < data.length; i++) {
+      const r = data[i];
+      const num = i + (skipHeader ? 2 : 1);
       const nome = (r[0] ?? "").trim();
       const telefone = (r[1] ?? "").trim();
-      if (!nome || !telefone) { skipped++; continue; }
+      if (!nome) { reasons.push(`Linha ${num}: nome vazio.`); continue; }
+      if (!telefone) { reasons.push(`Linha ${num}: telefone vazio.`); continue; }
       valid.push({
         nome,
         telefone,
@@ -104,7 +107,7 @@ function ClientesPage() {
         observacoes: (r[4] ?? "").trim() || null,
       });
     }
-    return { valid, skipped };
+    return { valid, skipped: reasons.length, reasons };
   };
 
   const filtered = clientes.filter((c) =>

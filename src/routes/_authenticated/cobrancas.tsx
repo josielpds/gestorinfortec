@@ -19,7 +19,7 @@ import { brl, fmtDate, effectiveStatus, todayISO } from "@/lib/format";
 import { waLink, renderTemplate } from "@/lib/whatsapp";
 import { FREQ_LABEL, gerarDatas, quantidadeParaFim, fimParaQuantidade } from "@/lib/recorrencia";
 import { BulkImportDialog } from "@/components/BulkImportDialog";
-import { parseDelimited, parseValor } from "@/lib/import";
+import { parseDelimited, parseValor, parseDate, norm } from "@/lib/import";
 
 export const Route = createFileRoute("/_authenticated/cobrancas")({
   head: () => ({ meta: [{ title: "Contas a Receber — CobraZap" }, { name: "description", content: "Cadastro e gestão das contas a receber dos seus clientes." }] }),
@@ -101,26 +101,28 @@ function CobrancasPage() {
     const skipHeader = rows[0]?.[0]?.toLowerCase().includes("cliente");
     const data = skipHeader ? rows.slice(1) : rows;
     const clienteById = new Map<string, string>();
-    for (const c of clientes) clienteById.set(c.nome.trim().toLowerCase(), c.id);
+    for (const c of clientes) clienteById.set(norm(c.nome), c.id);
     const catById = new Map<string, string>();
-    for (const c of categorias) catById.set(c.nome.trim().toLowerCase(), c.id);
+    for (const c of categorias) catById.set(norm(c.nome), c.id);
     const valid: any[] = [];
-    let skipped = 0;
-    for (const r of data) {
+    const reasons: string[] = [];
+    for (let i = 0; i < data.length; i++) {
+      const r = data[i];
+      const num = i + (skipHeader ? 2 : 1);
       const clienteNome = (r[0] ?? "").trim();
       const descricao = (r[1] ?? "").trim();
       const valor = parseValor(r[2] ?? "");
-      const vencimento = (r[3] ?? "").trim();
+      const vencimento = parseDate(r[3] ?? "");
       const categoriaNome = (r[4] ?? "").trim();
       const observacoes = (r[5] ?? "").trim();
       const frequencia = (r[6] ?? "").trim().toLowerCase();
       const qtd = parseInt((r[7] ?? "").trim(), 10) || 0;
-      const cliente_id = clienteById.get(clienteNome.toLowerCase());
-      if (!cliente_id || !descricao || valor === null || valor <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(vencimento)) {
-        skipped++;
-        continue;
-      }
-      if (frequencia && !FREQ_LABEL[frequencia]) { skipped++; continue; }
+      const cliente_id = clienteById.get(norm(clienteNome));
+      if (!cliente_id) { reasons.push(`Linha ${num}: cliente "${clienteNome || "(vazio)"}" não encontrado — cadastre ou importe o cliente antes.`); continue; }
+      if (!descricao) { reasons.push(`Linha ${num}: descrição vazia.`); continue; }
+      if (valor === null || valor <= 0) { reasons.push(`Linha ${num}: valor inválido ("${(r[2] ?? "").trim()}").`); continue; }
+      if (!vencimento) { reasons.push(`Linha ${num}: vencimento inválido ("${(r[3] ?? "").trim()}"). Use formato dd/mm/aaaa ou aaaa-mm-dd.`); continue; }
+      if (frequencia && !FREQ_LABEL[frequencia]) { reasons.push(`Linha ${num}: frequência desconhecida ("${(r[6] ?? "").trim()}"). Use semanal, quinzenal, mensal, bimestral, trimestral, semestral ou anual.`); continue; }
       const recorrente = !!frequencia;
       const fim = recorrente && qtd > 0 ? quantidadeParaFim(vencimento, frequencia, qtd) : null;
       valid.push({
@@ -128,14 +130,14 @@ function CobrancasPage() {
         descricao,
         valor,
         vencimento,
-        categoria_id: catById.get(categoriaNome.toLowerCase()) ?? null,
+        categoria_id: catById.get(norm(categoriaNome)) ?? null,
         observacoes: observacoes || null,
         recorrente,
         frequencia: frequencia || null,
         recorrencia_fim: fim,
       });
     }
-    return { valid, skipped };
+    return { valid, skipped: reasons.length, reasons };
   };
 
   const update = useMutation({
@@ -320,7 +322,7 @@ function CobrancasPage() {
                   <DialogTrigger asChild><Button variant="outline" disabled={clientes.length === 0}><Upload className="h-4 w-4 mr-2" /> Importar em massa</Button></DialogTrigger>
                   <BulkImportDialog
                     title="Importar cobranças em massa"
-                    description="Baixe o modelo, preencha com suas cobranças e importe. O cliente e a categoria devem existir no sistema (serão buscados pelo nome). Preencha frequencia e quantidade para criar uma mensalidade/recorrência."
+                    description="Baixe o modelo, preencha com suas cobranças e importe. O cliente e a categoria devem existir no sistema (serão buscados pelo nome). Vencimento aceita dd/mm/aaaa ou aaaa-mm-dd. Preencha frequencia e quantidade para criar uma mensalidade/recorrência."
                     templateName="cobrancas-modelo.csv"
                     columns={[
                       { key: "cliente", label: "cliente", example: "MERCADINHO CANARIO" },

@@ -5,14 +5,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Download, FileUp } from "lucide-react";
 import { toast } from "sonner";
-import { downloadTemplate, parseDelimited, type ImportColumn } from "@/lib/import";
+import { downloadTemplate, parseDelimited, decodeFileText, type ImportColumn } from "@/lib/import";
 
 type Props = {
   title: string;
   description: string;
   templateName: string;
   columns: ImportColumn[];
-  parse: (rows: string[][]) => { valid: any[]; skipped: number };
+  parse: (rows: string[][]) => { valid: any[]; skipped: number; reasons?: string[] };
   onSubmit: (rows: any[]) => void;
   loading: boolean;
   itemLabel: string;
@@ -22,14 +22,10 @@ export function BulkImportDialog({ title, description, templateName, columns, pa
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
 
-  const handleFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const content = String(reader.result ?? "");
-      setText(content);
-      setFileName(file.name);
-    };
-    reader.readAsText(file);
+  const handleFile = async (file: File) => {
+    const buffer = await file.arrayBuffer();
+    setText(decodeFileText(buffer));
+    setFileName(file.name);
   };
 
   const parsed = text.trim() ? parse(parseDelimited(text)) : null;
@@ -59,10 +55,21 @@ export function BulkImportDialog({ title, description, templateName, columns, pa
         </div>
 
         {parsed && (
-          <p className="text-sm text-muted-foreground">
-            {ok} {itemLabel}(s) válido(s)
-            {parsed.skipped > 0 && <span className="text-destructive"> · {parsed.skipped} ignorada(s)</span>}
-          </p>
+          <div className="space-y-1">
+            <p className="text-sm text-muted-foreground">
+              {ok} {itemLabel}(s) válido(s)
+              {parsed.skipped > 0 && (
+                <span className="text-destructive"> · {parsed.skipped} ignorada(s)</span>
+              )}
+            </p>
+            {parsed.reasons && parsed.reasons.length > 0 && (
+              <ul className="max-h-32 overflow-y-auto rounded-md border bg-muted/40 p-2 space-y-0.5 text-xs text-destructive">
+                {parsed.reasons.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </div>
       <DialogFooter>
