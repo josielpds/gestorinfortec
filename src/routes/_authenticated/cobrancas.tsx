@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Check, Send, Repeat, Pencil, CalendarPlus, CircleSlash, ChevronRight, ChevronDown, Upload } from "lucide-react";
+import { Plus, Trash2, Check, Send, Repeat, Pencil, CalendarPlus, CircleSlash, ChevronRight, ChevronDown, Upload, Search, CalendarRange } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { brl, fmtDate, effectiveStatus, todayISO } from "@/lib/format";
@@ -46,6 +46,7 @@ function CobrancasPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>(() => todayISO().slice(0, 7));
   const [expandido, setExpandido] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
   const { data: cobrancas = [] } = useQuery({
     queryKey: ["cobrancas"],
@@ -212,7 +213,7 @@ function CobrancasPage() {
         </td>
         <td className={"px-4 py-3" + (filha ? " pl-10" : "")}>
           <div className="flex items-center gap-2">
-            {filha ? <span className="text-muted-foreground">Parcela · {c.descricao}</span> : c.descricao}
+            {filha ? <span className="text-muted-foreground">{c.descricao}</span> : c.descricao}
             {!filha && c.recorrente && (
               <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 gap-1">
                 <Repeat className="h-3 w-3" /> {FREQ_LABEL[c.frequencia ?? ""] ?? "Recorrente"}
@@ -274,14 +275,56 @@ function CobrancasPage() {
     return effectiveStatus(c.vencimento, c.status) === filter;
   });
 
-  // Agrupa as parcelas de uma mesma mensalidade (série) em uma única linha
-  const grupos: { key: string; itens: Cobranca[] }[] = [];
-  const idx = new Map<string, number>();
+  // Agrupa as cobranças por cliente
+  const grupos: { cliente_id: string; nome: string; itens: Cobranca[] }[] = [];
+  const idxCliente = new Map<string, number>();
   for (const c of filtered) {
-    const key = c.origem_id ?? c.id;
-    if (!idx.has(key)) { idx.set(key, grupos.length); grupos.push({ key, itens: [] }); }
-    grupos[idx.get(key)!].itens.push(c);
+    if (!idxCliente.has(c.cliente_id)) {
+      idxCliente.set(c.cliente_id, grupos.length);
+      grupos.push({ cliente_id: c.cliente_id, nome: c.clientes?.nome ?? "—", itens: [] });
+    }
+    grupos[idxCliente.get(c.cliente_id)!].itens.push(c);
   }
+
+  const hojeYM = todayISO().slice(0, 7);
+
+  const resumoCliente = (g: { cliente_id: string; itens: Cobranca[] }) => {
+    const todas = cobrancas.filter((c) => c.cliente_id === g.cliente_id);
+    const abertas = todas.filter((c) => ["pendente", "atrasado"].includes(effectiveStatus(c.vencimento, c.status)));
+    const pagas = todas.filter((c) => c.status === "pago");
+    const meses = new Set<string>();
+    for (const c of abertas) {
+      if (c.recorrente && c.recorrencia_fim) {
+        let [y, m] = c.vencimento.split("-").map(Number);
+        while (true) {
+          const ym = `${y}-${String(m).padStart(2, "0")}`;
+          if (ym > hojeYM) meses.add(ym);
+          if (ym >= c.recorrencia_fim.slice(0, 7)) break;
+          m++;
+          if (m > 12) { m = 1; y++; }
+        }
+      } else {
+        const ym = c.vencimento.slice(0, 7);
+        if (ym > hojeYM) meses.add(ym);
+      }
+    }
+    const abertasOrdenadas = [...abertas].sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+    return {
+      abertas,
+      pagas,
+      totalAberto: abertas.reduce((s, c) => s + Number(c.valor), 0),
+      proxima: abertasOrdenadas[0] ?? null,
+      mesesFuturos: meses.size,
+    };
+  };
+
+  const somenteAberto = filter === "todos";
+  const q = search.trim().toLowerCase();
+  const clientesFiltrados = grupos
+    .map((g) => ({ grupo: g, resumo: resumoCliente(g) }))
+    .filter(({ resumo }) => !somenteAberto || resumo.abertas.length > 0)
+    .filter(({ grupo }) => !q || grupo.nome.toLowerCase().includes(q))
+    .sort((a, b) => a.grupo.nome.localeCompare(b.grupo.nome));
 
   const recebidoMes = cobrancasDoMes
     .filter((c) => c.status === "pago")
@@ -376,19 +419,31 @@ function CobrancasPage() {
           </CardContent></Card>
         </div>
 
-        <div className="flex flex-wrap gap-2 mb-4">
-          {["todos", "pendente", "atrasado", "pago", "cancelado", "recorrente"].map((s) => (
-            <Button key={s} variant={filter === s ? "default" : "outline"} size="sm" onClick={() => setFilter(s)}>
-              {s === "todos" ? "Todas" : s === "recorrente" ? "Mensalidades" : s.charAt(0).toUpperCase() + s.slice(1)}
-            </Button>
-          ))}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex flex-wrap gap-2">
+            {["todos", "pendente", "atrasado", "pago", "cancelado", "recorrente"].map((s) => (
+              <Button key={s} variant={filter === s ? "default" : "outline"} size="sm" onClick={() => setFilter(s)}>
+                {s === "todos" ? "Todas" : s === "recorrente" ? "Mensalidades" : s.charAt(0).toUpperCase() + s.slice(1)}
+              </Button>
+            ))}
+          </div>
+          <div className="relative w-full max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Buscar cliente com cobrança..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+          </div>
         </div>
 
         <Card>
           <CardContent className="p-0">
-            {grupos.length === 0 ? (
+            {clientesFiltrados.length === 0 ? (
               <div className="py-16 text-center text-muted-foreground">
-                {clientes.length === 0 ? "Cadastre um cliente antes de criar cobranças" : "Nenhuma cobrança encontrada"}
+                {clientes.length === 0
+                  ? "Cadastre um cliente antes de criar cobranças"
+                  : q
+                    ? "Nenhum cliente encontrado para a busca"
+                    : filter === "todos"
+                      ? "Nenhum cliente com cobrança em aberto"
+                      : "Nenhum cliente encontrado"}
               </div>
             ) : (
               <table className="w-full">
@@ -404,37 +459,39 @@ function CobrancasPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {grupos.map((g) => {
-                    const isSerie = g.itens.length > 1;
-                    if (!isSerie) {
-                      return renderLinha(g.itens[0], false);
-                    }
-                    const ordenadas = [...g.itens].sort((a, b) => a.vencimento.localeCompare(b.vencimento));
-                    const pendentes = ordenadas.filter((c) => c.status === "pendente");
-                    const proxima = pendentes[0];
-                    const pagas = ordenadas.filter((c) => c.status === "pago");
-                    const aberto = expandido === g.key;
-                    const head = proxima ?? ordenadas[ordenadas.length - 1];
+                  {clientesFiltrados.map(({ grupo, resumo }) => {
+                    const key = `cli:${grupo.cliente_id}`;
+                    const aberto = expandido === key;
+                    const ordenadas = [...grupo.itens].sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+                    const proxima = resumo.proxima;
                     return (
-                      <Fragment key={g.key}>
+                      <Fragment key={grupo.cliente_id}>
                         <tr className="bg-muted/20 hover:bg-muted/30">
-                          <td className="px-4 py-3 font-medium">{head.clientes?.nome ?? "—"}</td>
-                          <td className="px-4 py-3">
-                            <button className="flex items-center gap-2 text-left" onClick={() => setExpandido(aberto ? null : g.key)}>
+                          <td className="px-4 py-3 font-medium">
+                            <button className="flex items-center gap-2 text-left" onClick={() => setExpandido(aberto ? null : key)}>
                               {aberto ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                              <span>{head.descricao}</span>
-                              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 gap-1">
-                                <Repeat className="h-3 w-3" /> Mensalidade
-                              </Badge>
+                              <span>{grupo.nome}</span>
                             </button>
-                            <div className="text-xs text-muted-foreground mt-1 ml-6">
-                              {pagas.length} paga(s) · {pendentes.length} pendente(s)
-                              {proxima && <> · próxima em {fmtDate(proxima.vencimento)}</>}
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-1 ml-6">
+                              {resumo.mesesFuturos > 0 && (
+                                <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 gap-1">
+                                  <CalendarRange className="h-3 w-3" />
+                                  {resumo.mesesFuturos} {resumo.mesesFuturos === 1 ? "mês" : "meses"} futuros
+                                </Badge>
+                              )}
+                              <span>
+                                {resumo.abertas.length} em aberto · {resumo.pagas.length} paga(s)
+                              </span>
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground">{head.categorias?.nome ?? "—"}</td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {resumo.mesesFuturos > 0
+                              ? `${resumo.mesesFuturos} ${resumo.mesesFuturos === 1 ? "mês" : "meses"} programado(s)`
+                              : "Sem programação futura"}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{proxima?.categorias?.nome ?? "—"}</td>
                           <td className="px-4 py-3 text-right font-semibold">
-                            {brl(pendentes.reduce((s, c) => s + Number(c.valor), 0))}
+                            {brl(resumo.totalAberto)}
                             <div className="text-xs font-normal text-muted-foreground">em aberto</div>
                           </td>
                           <td className="px-4 py-3">{proxima ? fmtDate(proxima.vencimento) : "—"}</td>
@@ -443,11 +500,11 @@ function CobrancasPage() {
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
                             {proxima && (
-                              <Button size="sm" variant="ghost" title="Dar baixa na próxima parcela" onClick={() => marcarPago.mutate(proxima.id)}>
+                              <Button size="sm" variant="ghost" title="Dar baixa na próxima cobrança" onClick={() => marcarPago.mutate(proxima.id)}>
                                 <Check className="h-4 w-4 text-success" />
                               </Button>
                             )}
-                            <Button size="sm" variant="ghost" title={aberto ? "Ocultar parcelas" : "Ver parcelas"} onClick={() => setExpandido(aberto ? null : g.key)}>
+                            <Button size="sm" variant="ghost" title={aberto ? "Ocultar cobranças" : "Ver cobranças"} onClick={() => setExpandido(aberto ? null : key)}>
                               {aberto ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                             </Button>
                           </td>
