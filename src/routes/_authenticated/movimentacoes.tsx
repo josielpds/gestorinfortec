@@ -15,6 +15,7 @@ import { Plus, Trash2, TrendingUp, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 import { brl, fmtDate, todayISO } from "@/lib/format";
 import { currentUserId } from "@/hooks/useCurrentUser";
+import { monthsPT } from "@/lib/format";
 
 export const Route = createFileRoute("/_authenticated/movimentacoes")({
   head: () => ({ meta: [
@@ -35,6 +36,7 @@ function MovimentacoesPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<"todos" | "entrada" | "saida">("todos");
+  const [mesFilter, setMesFilter] = useState<"todos" | string | null>(null);
 
   const { data: movs = [] } = useQuery({
     queryKey: ["movimentacoes"],
@@ -81,11 +83,24 @@ function MovimentacoesPage() {
     onError: (e: any) => toast.error(e.message),
   });
 
-  const filtered = movs.filter((m) => filter === "todos" ? true : m.tipo === filter);
-  const entradas = movs.filter((m) => m.tipo === "entrada" && m.status === "pago").reduce((s, m) => s + Number(m.valor), 0);
-  const saidas = movs.filter((m) => m.tipo === "saida" && m.status === "pago").reduce((s, m) => s + Number(m.valor), 0);
-  const pendenteReceber = movs.filter((m) => m.tipo === "entrada" && m.status === "pendente").reduce((s, m) => s + Number(m.valor), 0);
-  const pendentePagar = movs.filter((m) => m.tipo === "saida" && m.status === "pendente").reduce((s, m) => s + Number(m.valor), 0);
+  const filtered = movs.filter((m) => {
+      const mesMatch = mesFilter === "todos" || !mesFilter
+        ? true
+        : m.data.slice(0, 7) === mesFilter;
+      return filter === "todos" ? true : m.tipo === filter && mesMatch;
+    });
+  const entradas = movs
+    .filter((m) => m.tipo === "entrada" && m.status === "pago" && (mesFilter === "todos" || !mesFilter || m.data.slice(0, 7) === mesFilter))
+    .reduce((s, m) => s + Number(m.valor), 0);
+  const saidas = movs
+    .filter((m) => m.tipo === "saida" && m.status === "pago" && (mesFilter === "todos" || !mesFilter || m.data.slice(0, 7) === mesFilter))
+    .reduce((s, m) => s + Number(m.valor), 0);
+  const pendenteReceber = movs
+    .filter((m) => m.tipo === "entrada" && m.status === "pendente" && (mesFilter === "todos" || !mesFilter || m.data.slice(0, 7) === mesFilter))
+    .reduce((s, m) => s + Number(m.valor), 0);
+  const pendentePagar = movs
+    .filter((m) => m.tipo === "saida" && m.status === "pendente" && (mesFilter === "todos" || !mesFilter || m.data.slice(0, 7) === mesFilter))
+    .reduce((s, m) => s + Number(m.valor), 0);
 
   return (
     <AppLayout>
@@ -113,6 +128,20 @@ function MovimentacoesPage() {
           {(["todos", "entrada", "saida"] as const).map((s) => (
             <Button key={s} variant={filter === s ? "default" : "outline"} size="sm" onClick={() => setFilter(s)}>
               {s === "todos" ? "Todos" : s === "entrada" ? "Entradas" : "Saídas"}
+            </Button>
+          ))}
+          <Button variant="outline" size="sm" onClick={() => setMesFilter(null)}>Mês</Button>
+        </div>
+
+        <div className="flex gap-2 mb-4 hidden sm:block" id="mes-filter">
+          {(monthsPT as const).map((m) => (
+            <Button
+              key={m}
+              variant={mesFilter === m ? "default" : "outline"}
+              size="sm"
+              onClick={() => setMesFilter(m)}
+            >
+              {m}
             </Button>
           ))}
         </div>

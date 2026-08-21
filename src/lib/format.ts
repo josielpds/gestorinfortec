@@ -22,3 +22,18 @@ export const isOverdue = (venc: string, status: string) =>
 
 export const effectiveStatus = (venc: string, status: string) =>
   isOverdue(venc, status) ? "atrasado" : status;
+
+export const monthsPT = [
+  "janeiro",
+  "fevereiro",
+  "março",
+  "abril",
+  "maio",
+  "junho",
+  "julho",
+  "agosto",
+  "setembro",
+  "outubro",
+  "novembro",
+  "dezembro",
+] as const;

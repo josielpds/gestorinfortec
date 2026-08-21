@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, CheckCircle2, RotateCcw, AlertTriangle, Wallet, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import { brl, fmtDate, todayISO } from "@/lib/format";
+import { monthsPT } from "@/lib/format";
 import { currentUserId } from "@/hooks/useCurrentUser";
 
 export const Route = createFileRoute("/_authenticated/contas-a-pagar")({
@@ -44,6 +45,7 @@ function ContasPagarPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [filtro, setFiltro] = useState<"todos" | "pendente" | "atrasado" | "pago">("todos");
+  const [mesFilter, setMesFilter] = useState<"todos" | string | null>(null);
 
   const { data: contas = [] } = useQuery({
     queryKey: ["contas_pagar"],
@@ -92,11 +94,12 @@ function ContasPagarPage() {
 
   const atrasada = (c: Conta) => c.status === "pendente" && c.vencimento < hoje();
   const mes = hoje().slice(0, 7);
+  const mesFilterAtual = mesFilter === "todos" || mesFilter === null ? true : c.pago_em?.startsWith(mesFilter);
 
-  const aPagar = contas.filter((c) => c.status === "pendente").reduce((s, c) => s + Number(c.valor), 0);
+  const aPagar = contas.filter((c) => c.status === "pendente" && (mesFilter === "todos" || !mesFilter || !c.pago_em?.startsWith(mes))).reduce((s, c) => s + Number(c.valor), 0);
   const emAtraso = contas.filter(atrasada).reduce((s, c) => s + Number(c.valor), 0);
   const pagoMes = contas
-    .filter((c) => c.status === "pago" && (c.pago_em ?? "").startsWith(mes))
+    .filter((c) => c.status === "pago" && (c.pago_em ?? "").startsWith(mes) && (mesFilter === "todos" || !mesFilter || c.pago_em?.startsWith(mesFilter)))
     .reduce((s, c) => s + Number(c.valor), 0);
 
   const filtered = contas.filter((c) =>
@@ -129,6 +132,20 @@ function ContasPagarPage() {
           {(["todos", "pendente", "atrasado", "pago"] as const).map((s) => (
             <Button key={s} size="sm" variant={filtro === s ? "default" : "outline"} onClick={() => setFiltro(s)}>
               {s === "todos" ? "Todas" : s === "pendente" ? "Pendentes" : s === "atrasado" ? "Atrasadas" : "Pagas"}
+            </Button>
+          ))}
+          <Button variant="outline" size="sm" onClick={() => setMesFilter(null)}>Mês</button>
+        </div>
+
+        <div className="flex gap-2 mb-4 hidden sm:block" id="mes-filter">
+          {(monthsPT as const).map((m) => (
+            <Button
+              key={m}
+              variant={mesFilter === m ? "default" : "outline"}
+              size="sm"
+              onClick={() => setMesFilter(m)}
+            >
+              {m}
             </Button>
           ))}
         </div>
