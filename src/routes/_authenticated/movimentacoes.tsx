@@ -83,10 +83,25 @@ function MovimentacoesPage() {
         data: p.data || todayISO(),
         categoria: p.categoria || null,
         cliente_id: p.cliente_id || null,
-        observacoes: p.observacoes || null,
       };
-      const { error } = await supabase.from("movimentacoes").insert(payload);
-      if (error) throw error;
+
+      if (p.observacoes && p.observacoes.trim()) {
+        payload.observacoes = p.observacoes.trim();
+        const { error } = await supabase.from("movimentacoes").insert(payload);
+        if (error) {
+          // Se a coluna observacoes não existir no banco de dados do Supabase
+          if (error.message?.includes("observacoes") || error.code === "PGRST204" || error.code === "42703") {
+            delete payload.observacoes;
+            const { error: errSemObs } = await supabase.from("movimentacoes").insert(payload);
+            if (errSemObs) throw errSemObs;
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        const { error } = await supabase.from("movimentacoes").insert(payload);
+        if (error) throw error;
+      }
     },
     onSuccess: () => {
       toast.success("Lançamento adicionado com sucesso!");
@@ -103,8 +118,20 @@ function MovimentacoesPage() {
 
   const update = useMutation({
     mutationFn: async ({ id, payload }: { id: string; payload: any }) => {
-      const { error } = await supabase.from("movimentacoes").update(payload).eq("id", id);
-      if (error) throw error;
+      const cleanPayload = { ...payload };
+      if (!cleanPayload.observacoes) {
+        delete cleanPayload.observacoes;
+      }
+      const { error } = await supabase.from("movimentacoes").update(cleanPayload).eq("id", id);
+      if (error) {
+        if (error.message?.includes("observacoes") || error.code === "PGRST204" || error.code === "42703") {
+          delete cleanPayload.observacoes;
+          const { error: e2 } = await supabase.from("movimentacoes").update(cleanPayload).eq("id", id);
+          if (e2) throw e2;
+        } else {
+          throw error;
+        }
+      }
     },
     onSuccess: () => {
       toast.success("Lançamento atualizado com sucesso!");

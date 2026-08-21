@@ -240,11 +240,20 @@ export async function restaurarBackupCompleto(dados: Record<string, any[]>): Pro
         cliente_id: m.cliente_id ?? null,
         cobranca_id: m.cobranca_id ?? null,
         conta_pagar_id: m.conta_pagar_id ?? null,
-        observacoes: m.observacoes ?? null,
+        ...(m.observacoes ? { observacoes: m.observacoes } : {}),
       }));
     if (movs.length > 0) {
       const { error } = await supabase.from("movimentacoes").upsert(movs, { onConflict: "id" });
-      if (error) throw new Error(`Erro ao restaurar movimentações: ${error.message}`);
+      if (error) {
+        // Se a coluna observações não existir no Supabase, tenta sem ela
+        if (error.message?.includes("observacoes") || error.code === "PGRST204" || error.code === "42703") {
+          const movsSemObs = movs.map(({ observacoes, ...rest }: any) => rest);
+          const { error: e2 } = await supabase.from("movimentacoes").upsert(movsSemObs, { onConflict: "id" });
+          if (e2) throw new Error(`Erro ao restaurar movimentações: ${e2.message}`);
+        } else {
+          throw new Error(`Erro ao restaurar movimentações: ${error.message}`);
+        }
+      }
       summary.movimentacoes = movs.length;
     }
   }
