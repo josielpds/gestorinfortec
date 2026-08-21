@@ -226,7 +226,7 @@ export async function restaurarBackupCompleto(dados: Record<string, any[]>): Pro
 
   // 7. Movimentações
   if (Array.isArray(dados.movimentacoes) && dados.movimentacoes.length > 0) {
-    const movs = dados.movimentacoes
+    let movs = dados.movimentacoes
       .filter((m: any) => m && m.descricao && m.tipo)
       .map((m: any) => ({
         ...(m.id ? { id: m.id } : {}),
@@ -242,19 +242,31 @@ export async function restaurarBackupCompleto(dados: Record<string, any[]>): Pro
         conta_pagar_id: m.conta_pagar_id ?? null,
         ...(m.observacoes ? { observacoes: m.observacoes } : {}),
       }));
+
     if (movs.length > 0) {
-      const { error } = await supabase.from("movimentacoes").upsert(movs, { onConflict: "id" });
-      if (error) {
-        // Se a coluna observações não existir no Supabase, tenta sem ela
-        if (error.message?.includes("observacoes") || error.code === "PGRST204" || error.code === "42703") {
-          const movsSemObs = movs.map(({ observacoes, ...rest }: any) => rest);
-          const { error: e2 } = await supabase.from("movimentacoes").upsert(movsSemObs, { onConflict: "id" });
-          if (e2) throw new Error(`Erro ao restaurar movimentações: ${e2.message}`);
-        } else {
-          throw new Error(`Erro ao restaurar movimentações: ${error.message}`);
+      let restored = false;
+      const maxAttempts = 4;
+      for (let attempt = 0; attempt < maxAttempts && !restored; attempt++) {
+        const { error } = await supabase.from("movimentacoes").upsert(movs, { onConflict: "id" });
+        if (!error) {
+          restored = true;
+          summary.movimentacoes = movs.length;
+          break;
         }
+
+        const match = error.message?.match(/Could not find the '([^']+)' column/i);
+        if (match && match[1]) {
+          const col = match[1];
+          movs = movs.map((item: any) => {
+            const copy = { ...item };
+            delete copy[col];
+            return copy;
+          });
+          continue;
+        }
+
+        throw new Error(`Erro ao restaurar movimentações: ${error.message}`);
       }
-      summary.movimentacoes = movs.length;
     }
   }
 

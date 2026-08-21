@@ -42,6 +42,41 @@ type Mov = {
   clientes?: { nome: string } | null;
 };
 
+// Helper para inserção segura removendo automaticamente colunas não existentes no schema cache do Supabase
+async function insertMovimentacaoSafely(payload: Record<string, any>) {
+  const current = { ...payload };
+  const maxAttempts = 4;
+  for (let i = 0; i < maxAttempts; i++) {
+    const { data, error } = await supabase.from("movimentacoes").insert(current).select();
+    if (!error) return data;
+
+    // Detecta se o erro é de coluna ausente no cache do PostgREST (ex: 'status', 'observacoes', etc.)
+    const match = error.message?.match(/Could not find the '([^']+)' column/i);
+    if (match && match[1] && match[1] in current) {
+      delete current[match[1]];
+      continue;
+    }
+    throw error;
+  }
+}
+
+// Helper para atualização segura removendo automaticamente colunas não existentes
+async function updateMovimentacaoSafely(id: string, payload: Record<string, any>) {
+  const current = { ...payload };
+  const maxAttempts = 4;
+  for (let i = 0; i < maxAttempts; i++) {
+    const { data, error } = await supabase.from("movimentacoes").update(current).eq("id", id).select();
+    if (!error) return data;
+
+    const match = error.message?.match(/Could not find the '([^']+)' column/i);
+    if (match && match[1] && match[1] in current) {
+      delete current[match[1]];
+      continue;
+    }
+    throw error;
+  }
+}
+
 function MovimentacoesPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -84,24 +119,11 @@ function MovimentacoesPage() {
         categoria: p.categoria || null,
         cliente_id: p.cliente_id || null,
       };
-
       if (p.observacoes && p.observacoes.trim()) {
         payload.observacoes = p.observacoes.trim();
-        const { error } = await supabase.from("movimentacoes").insert(payload);
-        if (error) {
-          // Se a coluna observacoes não existir no banco de dados do Supabase
-          if (error.message?.includes("observacoes") || error.code === "PGRST204" || error.code === "42703") {
-            delete payload.observacoes;
-            const { error: errSemObs } = await supabase.from("movimentacoes").insert(payload);
-            if (errSemObs) throw errSemObs;
-          } else {
-            throw error;
-          }
-        }
-      } else {
-        const { error } = await supabase.from("movimentacoes").insert(payload);
-        if (error) throw error;
       }
+
+      await insertMovimentacaoSafely(payload);
     },
     onSuccess: () => {
       toast.success("Lançamento adicionado com sucesso!");
@@ -122,16 +144,7 @@ function MovimentacoesPage() {
       if (!cleanPayload.observacoes) {
         delete cleanPayload.observacoes;
       }
-      const { error } = await supabase.from("movimentacoes").update(cleanPayload).eq("id", id);
-      if (error) {
-        if (error.message?.includes("observacoes") || error.code === "PGRST204" || error.code === "42703") {
-          delete cleanPayload.observacoes;
-          const { error: e2 } = await supabase.from("movimentacoes").update(cleanPayload).eq("id", id);
-          if (e2) throw e2;
-        } else {
-          throw error;
-        }
-      }
+      await updateMovimentacaoSafely(id, cleanPayload);
     },
     onSuccess: () => {
       toast.success("Lançamento atualizado com sucesso!");
@@ -160,12 +173,8 @@ function MovimentacoesPage() {
 
   const toggleStatus = useMutation({
     mutationFn: async (m: Mov) => {
-      const novo = m.status === "pago" ? "pendente" : "pago";
-      const { error } = await supabase
-        .from("movimentacoes")
-        .update({ status: novo })
-        .eq("id", m.id);
-      if (error) throw error;
+      const novo = (m.status || "pago") === "pago" ? "pendente" : "pago";
+      await updateMovimentacaoSafely(m.id, { status: novo });
     },
     onSuccess: () => {
       toast.success("Situação atualizada");
@@ -184,10 +193,10 @@ function MovimentacoesPage() {
   );
 
   const entradas = movs
-    .filter((m) => m.tipo === "entrada" && m.status === "pago" && mesMatch(m))
+    .filter((m) => m.tipo === "entrada" && (!m.status || m.status === "pago") && mesMatch(m))
     .reduce((s, m) => s + Number(m.valor), 0);
   const saidas = movs
-    .filter((m) => m.tipo === "saida" && m.status === "pago" && mesMatch(m))
+    .filter((m) => m.tipo === "saida" && (!m.status || m.status === "pago") && mesMatch(m))
     .reduce((s, m) => s + Number(m.valor), 0);
   const pendenteReceber = movs
     .filter((m) => m.tipo === "entrada" && m.status === "pendente" && mesMatch(m))
