@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout, PageHeader } from "@/components/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,11 +11,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, TrendingUp, TrendingDown } from "lucide-react";
+import { MonthFilter } from "@/components/MonthFilter";
+import { Plus, Trash2, TrendingUp, TrendingDown, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { brl, fmtDate, todayISO } from "@/lib/format";
 import { currentUserId } from "@/hooks/useCurrentUser";
-import { monthsPT } from "@/lib/format";
 
 export const Route = createFileRoute("/_authenticated/movimentacoes")({
   head: () => ({ meta: [
@@ -26,17 +26,26 @@ export const Route = createFileRoute("/_authenticated/movimentacoes")({
 });
 
 type Mov = {
-  id: string; tipo: "entrada" | "saida"; valor: number; descricao: string;
-  categoria: string | null; data: string; cliente_id: string | null; cobranca_id: string | null;
-  status: "pago" | "pendente"; conta_pagar_id: string | null;
+  id: string;
+  tipo: "entrada" | "saida";
+  valor: number;
+  descricao: string;
+  categoria: string | null;
+  data: string;
+  cliente_id: string | null;
+  cobranca_id: string | null;
+  status: "pago" | "pendente";
+  conta_pagar_id: string | null;
+  observacoes: string | null;
   clientes?: { nome: string } | null;
 };
 
 function MovimentacoesPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Mov | null>(null);
   const [filter, setFilter] = useState<"todos" | "entrada" | "saida">("todos");
-  const [mesFilter, setMesFilter] = useState<"todos" | string | null>(null);
+  const [mesFilter, setMesFilter] = useState<string>(todayISO().slice(0, 7));
 
   const { data: movs = [] } = useQuery({
     queryKey: ["movimentacoes"],
@@ -63,6 +72,19 @@ function MovimentacoesPage() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  const update = useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: any }) => {
+      const { error } = await supabase.from("movimentacoes").update(payload).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Lançamento atualizado");
+      qc.invalidateQueries();
+      setEditing(null);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const remove = useMutation({
     mutationFn: async (m: Mov) => {
       if (m.cobranca_id) throw new Error("Esta entrada foi gerada por uma cobrança paga. Exclua ou reabra a cobrança.");
@@ -76,30 +98,34 @@ function MovimentacoesPage() {
   const toggleStatus = useMutation({
     mutationFn: async (m: Mov) => {
       const novo = m.status === "pago" ? "pendente" : "pago";
-      const { error } = await supabase.from("movimentacoes").update({ status: novo }).eq("id", m.id);
+      const { error } = await supabase
+        .from("movimentacoes")
+        .update({ status: novo })
+        .eq("id", m.id);
       if (error) throw error;
     },
     onSuccess: () => { toast.success("Situação atualizada"); qc.invalidateQueries(); },
     onError: (e: any) => toast.error(e.message),
   });
 
-  const filtered = movs.filter((m) => {
-      const mesMatch = mesFilter === "todos" || !mesFilter
-        ? true
-        : m.data.slice(0, 7) === mesFilter;
-      return filter === "todos" ? true : m.tipo === filter && mesMatch;
-    });
+  const mesMatch = (m: Mov) => mesFilter === "todos" || (m.data ?? "").slice(0, 7) === mesFilter;
+
+  const filtered = useMemo(
+    () => movs.filter((m) => filter === "todos" ? mesMatch(m) : m.tipo === filter && mesMatch(m)),
+    [movs, filter, mesFilter],
+  );
+
   const entradas = movs
-    .filter((m) => m.tipo === "entrada" && m.status === "pago" && (mesFilter === "todos" || !mesFilter || m.data.slice(0, 7) === mesFilter))
+    .filter((m) => m.tipo === "entrada" && m.status === "pago" && mesMatch(m))
     .reduce((s, m) => s + Number(m.valor), 0);
   const saidas = movs
-    .filter((m) => m.tipo === "saida" && m.status === "pago" && (mesFilter === "todos" || !mesFilter || m.data.slice(0, 7) === mesFilter))
+    .filter((m) => m.tipo === "saida" && m.status === "pago" && mesMatch(m))
     .reduce((s, m) => s + Number(m.valor), 0);
   const pendenteReceber = movs
-    .filter((m) => m.tipo === "entrada" && m.status === "pendente" && (mesFilter === "todos" || !mesFilter || m.data.slice(0, 7) === mesFilter))
+    .filter((m) => m.tipo === "entrada" && m.status === "pendente" && mesMatch(m))
     .reduce((s, m) => s + Number(m.valor), 0);
   const pendentePagar = movs
-    .filter((m) => m.tipo === "saida" && m.status === "pendente" && (mesFilter === "todos" || !mesFilter || m.data.slice(0, 7) === mesFilter))
+    .filter((m) => m.tipo === "saida" && m.status === "pendente" && mesMatch(m))
     .reduce((s, m) => s + Number(m.valor), 0);
 
   return (
@@ -109,10 +135,17 @@ function MovimentacoesPage() {
           title="Lançamentos de Entradas e Saídas"
           subtitle="Lance entradas e despesas manuais. Contas recebidas e pagas viram lançamentos automaticamente."
           action={
-            <Dialog open={open} onOpenChange={setOpen}>
-              <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> Novo lançamento</Button></DialogTrigger>
-              <MovForm categorias={cats as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
-            </Dialog>
+            <div className="flex flex-wrap items-center gap-2">
+              <MonthFilter selectedMonth={mesFilter} onChange={setMesFilter} allowAll />
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="h-4 w-4 mr-2" /> Novo lançamento
+                  </Button>
+                </DialogTrigger>
+                <MovForm categorias={cats as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
+              </Dialog>
+            </div>
           }
         />
 
@@ -124,24 +157,10 @@ function MovimentacoesPage() {
           <SummaryCard label="Saldo realizado" value={brl(entradas - saidas)} tone={entradas - saidas >= 0 ? "success" : "destructive"} icon={TrendingUp} />
         </div>
 
-        <div className="flex gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-4">
           {(["todos", "entrada", "saida"] as const).map((s) => (
             <Button key={s} variant={filter === s ? "default" : "outline"} size="sm" onClick={() => setFilter(s)}>
               {s === "todos" ? "Todos" : s === "entrada" ? "Entradas" : "Saídas"}
-            </Button>
-          ))}
-          <Button variant="outline" size="sm" onClick={() => setMesFilter(null)}>Mês</Button>
-        </div>
-
-        <div className="flex gap-2 mb-4 hidden sm:block" id="mes-filter">
-          {(monthsPT as const).map((m) => (
-            <Button
-              key={m}
-              variant={mesFilter === m ? "default" : "outline"}
-              size="sm"
-              onClick={() => setMesFilter(m)}
-            >
-              {m}
             </Button>
           ))}
         </div>
@@ -184,7 +203,7 @@ function MovimentacoesPage() {
                             if (m.cobranca_id || m.conta_pagar_id) return;
                             toggleStatus.mutate(m);
                           }}
-                          className="h-auto p-0"
+                          className="h-auto p-0 hover:bg-transparent"
                         >
                           <StatusBadge status={m.status} />
                         </Button>
@@ -192,9 +211,24 @@ function MovimentacoesPage() {
                       <td className={"px-4 py-3 text-right font-semibold " + (m.tipo === "entrada" ? "text-success" : "text-destructive")}>
                         {m.tipo === "entrada" ? "+" : "-"} {brl(m.valor)}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <Button size="sm" variant="ghost" title={m.cobranca_id ? "Vinculado a cobrança" : "Excluir"} onClick={() => { if (confirm("Excluir lançamento?")) remove.mutate(m); }}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Editar"
+                          onClick={() => setEditing(m)}
+                          disabled={!!m.cobranca_id || !!m.conta_pagar_id}
+                        >
+                          <Pencil className={"h-4 w-4 " + (m.cobranca_id || m.conta_pagar_id ? "text-muted-foreground" : "text-primary")} />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title={m.cobranca_id ? "Vinculado a cobrança" : "Excluir"}
+                          onClick={() => { if (confirm("Excluir lançamento?")) remove.mutate(m); }}
+                          disabled={!!m.cobranca_id}
+                        >
+                          <Trash2 className={"h-4 w-4 " + (m.cobranca_id ? "text-muted-foreground" : "text-destructive")} />
                         </Button>
                       </td>
                     </tr>
@@ -206,16 +240,50 @@ function MovimentacoesPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        {editing && (
+          <MovForm
+            categorias={cats as any}
+            initial={editing}
+            onSubmit={(p) => update.mutate({ id: editing.id, payload: p })}
+            loading={update.isPending}
+            submitLabel="Salvar alterações"
+          />
+        )}
+      </Dialog>
     </AppLayout>
   );
 }
 
-function MovForm({ categorias, onSubmit, loading }: { categorias: any[]; onSubmit: (p: any) => void; loading: boolean }) {
-  const [form, setForm] = useState({ tipo: "saida" as "entrada" | "saida", status: "pago" as "pago" | "pendente", valor: "", descricao: "", categoria: "", data: todayISO(), observacoes: "" });
+function MovForm({
+  categorias,
+  onSubmit,
+  loading,
+  initial,
+  submitLabel = "Lançar",
+}: {
+  categorias: any[];
+  onSubmit: (p: any) => void;
+  loading: boolean;
+  initial?: Mov;
+  submitLabel?: string;
+}) {
+  const [form, setForm] = useState({
+    tipo: (initial?.tipo ?? "saida") as "entrada" | "saida",
+    status: (initial?.status ?? "pago") as "pago" | "pendente",
+    valor: initial ? String(initial.valor) : "",
+    descricao: initial?.descricao ?? "",
+    categoria: initial?.categoria ?? "",
+    data: initial?.data ?? todayISO(),
+    observacoes: initial?.observacoes ?? "",
+  });
   const catsFiltradas = categorias.filter((c) => c.tipo === form.tipo);
   return (
     <DialogContent>
-      <DialogHeader><DialogTitle>Novo lançamento</DialogTitle></DialogHeader>
+      <DialogHeader>
+        <DialogTitle>{initial ? "Editar lançamento" : "Novo lançamento"}</DialogTitle>
+      </DialogHeader>
       <div className="grid gap-4 py-2">
         <div>
           <Label>Tipo *</Label>
@@ -254,7 +322,8 @@ function MovForm({ categorias, onSubmit, loading }: { categorias: any[]; onSubmi
         <div><Label>Observações</Label><Textarea rows={2} value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} maxLength={500} /></div>
       </div>
       <DialogFooter>
-        <Button disabled={loading || !form.descricao || !form.valor}
+        <Button
+          disabled={loading || !form.descricao || !form.valor}
           onClick={() => onSubmit({
             tipo: form.tipo,
             status: form.status,
@@ -262,8 +331,10 @@ function MovForm({ categorias, onSubmit, loading }: { categorias: any[]; onSubmi
             descricao: form.descricao,
             data: form.data,
             categoria: form.categoria || null,
-          })}>
-          {loading ? "Salvando..." : "Lançar"}
+            observacoes: form.observacoes || null,
+          })}
+        >
+          {loading ? "Salvando..." : submitLabel}
         </Button>
       </DialogFooter>
     </DialogContent>

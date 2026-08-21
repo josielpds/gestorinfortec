@@ -11,10 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, CheckCircle2, RotateCcw, AlertTriangle, Wallet, CalendarClock } from "lucide-react";
+import { MonthFilter } from "@/components/MonthFilter";
+import { Plus, Trash2, CheckCircle2, RotateCcw, AlertTriangle, Wallet, CalendarClock, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { brl, fmtDate, todayISO } from "@/lib/format";
-import { monthsPT } from "@/lib/format";
 import { currentUserId } from "@/hooks/useCurrentUser";
 
 export const Route = createFileRoute("/_authenticated/contas-a-pagar")({
@@ -44,8 +44,9 @@ const hoje = () => todayISO();
 function ContasPagarPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Conta | null>(null);
   const [filtro, setFiltro] = useState<"todos" | "pendente" | "atrasado" | "pago">("todos");
-  const [mesFilter, setMesFilter] = useState<"todos" | string | null>(null);
+  const [mesFilter, setMesFilter] = useState<string>(hoje().slice(0, 7));
 
   const { data: contas = [] } = useQuery({
     queryKey: ["contas_pagar"],
@@ -68,6 +69,19 @@ function ContasPagarPage() {
       if (error) throw error;
     },
     onSuccess: () => { toast.success("Conta cadastrada"); qc.invalidateQueries(); setOpen(false); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  const update = useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: any }) => {
+      const { error } = await supabase.from("contas_pagar").update(payload).eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast.success("Conta atualizada");
+      qc.invalidateQueries();
+      setEditing(null);
+    },
     onError: (e: any) => toast.error(e.message),
   });
 
@@ -94,19 +108,26 @@ function ContasPagarPage() {
 
   const atrasada = (c: Conta) => c.status === "pendente" && c.vencimento < hoje();
   const mes = hoje().slice(0, 7);
-  const mesFilterAtual = mesFilter === "todos" || mesFilter === null ? true : c.pago_em?.startsWith(mesFilter);
 
-  const aPagar = contas.filter((c) => c.status === "pendente" && (mesFilter === "todos" || !mesFilter || !c.pago_em?.startsWith(mes))).reduce((s, c) => s + Number(c.valor), 0);
+  const matchesMes = (c: Conta) => {
+    if (mesFilter === "todos") return true;
+    const ref = c.status === "pago" ? (c.pago_em ?? "") : c.vencimento;
+    return (ref ?? "").slice(0, 7) === mesFilter;
+  };
+
+  const aPagar = contas.filter((c) => c.status === "pendente" && matchesMes(c)).reduce((s, c) => s + Number(c.valor), 0);
   const emAtraso = contas.filter(atrasada).reduce((s, c) => s + Number(c.valor), 0);
   const pagoMes = contas
-    .filter((c) => c.status === "pago" && (c.pago_em ?? "").startsWith(mes) && (mesFilter === "todos" || !mesFilter || c.pago_em?.startsWith(mesFilter)))
+    .filter((c) => c.status === "pago" && matchesMes(c))
     .reduce((s, c) => s + Number(c.valor), 0);
 
-  const filtered = contas.filter((c) =>
-    filtro === "todos" ? true
-      : filtro === "atrasado" ? atrasada(c)
-      : c.status === filtro,
-  );
+  const filtered = contas.filter((c) => {
+    const statusOk =
+      filtro === "todos" ? true
+        : filtro === "atrasado" ? atrasada(c)
+        : c.status === filtro;
+    return statusOk && matchesMes(c);
+  });
 
   return (
     <AppLayout>
@@ -115,10 +136,15 @@ function ContasPagarPage() {
           title="Contas a Pagar"
           subtitle="Controle vencimentos e fornecedores. Ao dar baixa, a saída é lançada automaticamente."
           action={
-            <Dialog open={open} onOpenChange={setOpen}>
-              <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> Nova conta</Button></DialogTrigger>
-              <ContaForm categorias={cats as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
-            </Dialog>
+            <div className="flex flex-wrap items-center gap-2">
+              <MonthFilter selectedMonth={mesFilter} onChange={setMesFilter} allowAll />
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                  <Button><Plus className="h-4 w-4 mr-2" /> Nova conta</Button>
+                </DialogTrigger>
+                <ContaForm categorias={cats as any} onSubmit={(p) => create.mutate(p)} loading={create.isPending} />
+              </Dialog>
+            </div>
           }
         />
 
@@ -128,24 +154,10 @@ function ContasPagarPage() {
           <SummaryCard label="Pago no mês" value={brl(pagoMes)} tone="success" icon={Wallet} />
         </div>
 
-        <div className="flex gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-4">
           {(["todos", "pendente", "atrasado", "pago"] as const).map((s) => (
             <Button key={s} size="sm" variant={filtro === s ? "default" : "outline"} onClick={() => setFiltro(s)}>
               {s === "todos" ? "Todas" : s === "pendente" ? "Pendentes" : s === "atrasado" ? "Atrasadas" : "Pagas"}
-            </Button>
-          ))}
-          <Button variant="outline" size="sm" onClick={() => setMesFilter(null)}>Mês</button>
-        </div>
-
-        <div className="flex gap-2 mb-4 hidden sm:block" id="mes-filter">
-          {(monthsPT as const).map((m) => (
-            <Button
-              key={m}
-              variant={mesFilter === m ? "default" : "outline"}
-              size="sm"
-              onClick={() => setMesFilter(m)}
-            >
-              {m}
             </Button>
           ))}
         </div>
@@ -188,6 +200,9 @@ function ContasPagarPage() {
                       </td>
                       <td className="px-4 py-3 text-right font-semibold">{brl(c.valor)}</td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <Button size="sm" variant="ghost" title="Editar" onClick={() => setEditing(c)}>
+                          <Pencil className="h-4 w-4 text-primary" />
+                        </Button>
                         {c.status === "pago" ? (
                           <Button size="sm" variant="ghost" title="Reabrir" onClick={() => setStatus.mutate({ id: c.id, status: "pendente" })}>
                             <RotateCcw className="h-4 w-4" />
@@ -210,16 +225,49 @@ function ContasPagarPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
+        {editing && (
+          <ContaForm
+            categorias={cats as any}
+            initial={editing}
+            onSubmit={(p) => update.mutate({ id: editing.id, payload: p })}
+            loading={update.isPending}
+            submitLabel="Salvar alterações"
+          />
+        )}
+      </Dialog>
     </AppLayout>
   );
 }
 
-function ContaForm({ categorias, onSubmit, loading }: { categorias: any[]; onSubmit: (p: any) => void; loading: boolean }) {
-  const [form, setForm] = useState({ descricao: "", fornecedor: "", valor: "", vencimento: todayISO(), categoria: "", observacoes: "" });
+function ContaForm({
+  categorias,
+  onSubmit,
+  loading,
+  initial,
+  submitLabel = "Cadastrar",
+}: {
+  categorias: any[];
+  onSubmit: (p: any) => void;
+  loading: boolean;
+  initial?: Conta;
+  submitLabel?: string;
+}) {
+  const [form, setForm] = useState({
+    descricao: initial?.descricao ?? "",
+    fornecedor: initial?.fornecedor ?? "",
+    valor: initial ? String(initial.valor) : "",
+    vencimento: initial?.vencimento ?? todayISO(),
+    categoria: initial?.categoria ?? "",
+    observacoes: initial?.observacoes ?? "",
+  });
   const catsSaida = categorias.filter((c) => c.tipo === "saida");
   return (
     <DialogContent>
-      <DialogHeader><DialogTitle>Nova conta a pagar</DialogTitle></DialogHeader>
+      <DialogHeader>
+        <DialogTitle>{initial ? "Editar conta a pagar" : "Nova conta a pagar"}</DialogTitle>
+      </DialogHeader>
       <div className="grid gap-4 py-2">
         <div><Label>Descrição *</Label><Input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} maxLength={200} /></div>
         <div><Label>Fornecedor</Label><Input value={form.fornecedor} onChange={(e) => setForm({ ...form, fornecedor: e.target.value })} maxLength={120} /></div>
@@ -248,10 +296,10 @@ function ContaForm({ categorias, onSubmit, loading }: { categorias: any[]; onSub
             vencimento: form.vencimento,
             categoria: form.categoria || null,
             observacoes: form.observacoes || null,
-            status: "pendente",
+            ...(initial ? {} : { status: "pendente" }),
           })}
         >
-          {loading ? "Salvando..." : "Cadastrar"}
+          {loading ? "Salvando..." : submitLabel}
         </Button>
       </DialogFooter>
     </DialogContent>

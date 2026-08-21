@@ -232,6 +232,8 @@ export type Database = {
           data: string
           descricao: string
           id: string
+          observacoes: string | null
+          status: Database["public"]["Enums"]["movimentacao_status"]
           tipo: Database["public"]["Enums"]["movimentacao_tipo"]
           user_id: string
           valor: number
@@ -245,6 +247,8 @@ export type Database = {
           data?: string
           descricao: string
           id?: string
+          observacoes?: string | null
+          status?: Database["public"]["Enums"]["movimentacao_status"]
           tipo: Database["public"]["Enums"]["movimentacao_tipo"]
           user_id: string
           valor: number
@@ -258,6 +262,8 @@ export type Database = {
           data?: string
           descricao?: string
           id?: string
+          observacoes?: string | null
+          status?: Database["public"]["Enums"]["movimentacao_status"]
           tipo?: Database["public"]["Enums"]["movimentacao_tipo"]
           user_id?: string
           valor?: number
@@ -366,6 +372,7 @@ export type Database = {
     Enums: {
       app_role: "master" | "user"
       cobranca_status: "pendente" | "pago" | "atrasado" | "cancelado"
+      movimentacao_status: "pago" | "pendente"
       movimentacao_tipo: "entrada" | "saida"
       recorrencia_freq:
         | "semanal"
@@ -504,6 +511,7 @@ export const Constants = {
     Enums: {
       app_role: ["master", "user"],
       cobranca_status: ["pendente", "pago", "atrasado", "cancelado"],
+      movimentacao_status: ["pago", "pendente"],
       movimentacao_tipo: ["entrada", "saida"],
       recorrencia_freq: [
         "semanal",
