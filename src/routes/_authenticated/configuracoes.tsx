@@ -78,7 +78,7 @@ function ConfigPage() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-3xl">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-3xl">
         <PageHeader title="Configurações" subtitle="Personalize seu perfil, empresa e templates de mensagem" />
 
         <div className="space-y-6">

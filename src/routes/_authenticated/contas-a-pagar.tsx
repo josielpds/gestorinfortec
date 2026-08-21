@@ -107,7 +107,7 @@ function ContasPagarPage() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-[1400px]">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
         <PageHeader
           title="Contas a Pagar"
           subtitle="Controle vencimentos e fornecedores. Ao dar baixa, a saída é lançada automaticamente."
@@ -138,6 +138,7 @@ function ContasPagarPage() {
             {filtered.length === 0 ? (
               <div className="py-16 text-center text-muted-foreground">Nenhuma conta a pagar registrada</div>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
@@ -187,6 +188,7 @@ function ContasPagarPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
             )}
           </CardContent>
         </Card>

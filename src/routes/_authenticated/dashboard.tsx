@@ -138,7 +138,7 @@ export function Dashboard() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-[1400px]">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <PageHeader title="Dashboard" subtitle={`Visão geral do seu sistema — ${formatMonthLabel(selectedMonth)}`} />
           <MonthFilter selectedMonth={selectedMonth} onChange={setSelectedMonth} allowAll={true} />

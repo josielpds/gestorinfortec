@@ -89,7 +89,7 @@ function MovimentacoesPage() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-[1400px]">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
         <PageHeader
           title="Lançamentos de Entradas e Saídas"
           subtitle="Lance entradas e despesas manuais. Contas recebidas e pagas viram lançamentos automaticamente."
@@ -122,6 +122,7 @@ function MovimentacoesPage() {
             {filtered.length === 0 ? (
               <div className="py-16 text-center text-muted-foreground">Nenhuma movimentação registrada</div>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
@@ -171,6 +172,7 @@ function MovimentacoesPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
             )}
           </CardContent>
         </Card>

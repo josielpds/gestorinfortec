@@ -29,7 +29,7 @@ function RelatoriosPage() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-[1400px]">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
         <PageHeader title="Relatórios" subtitle="Análise financeira e de cadastros do seu negócio" />
 
         <Card className="mb-6">
@@ -156,6 +156,7 @@ function Faturamento({ from, to }: { from: string; to: string }) {
           {byCategoria.length === 0 ? (
             <div className="py-10 text-center text-muted-foreground text-sm">Nenhuma cobrança no período</div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
@@ -176,6 +177,7 @@ function Faturamento({ from, to }: { from: string; to: string }) {
                 ))}
               </tbody>
             </table>
+          </div>
           )}
         </CardContent>
       </Card>
@@ -330,6 +332,7 @@ function Movimentacoes({ from, to }: { from: string; to: string }) {
           ])}><Download className="h-4 w-4 mr-2" /> Exportar CSV</Button>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
               <tr>
@@ -359,6 +362,7 @@ function Movimentacoes({ from, to }: { from: string; to: string }) {
               {filteredItems.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-muted-foreground">Nenhum recebimento ou lançamento encontrado no período</td></tr>}
             </tbody>
           </table>
+        </div>
         </CardContent>
       </Card>
     </div>
@@ -443,6 +447,7 @@ function Cadastros({ from, to }: { from: string; to: string }) {
           ])}><Download className="h-4 w-4 mr-2" /> Exportar CSV</Button>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
               <tr><th className="text-left px-4 py-3">Nome</th><th className="text-left px-4 py-3">Telefone</th><th className="text-left px-4 py-3">Cadastrado</th><th className="text-left px-4 py-3">Status</th></tr>
@@ -459,6 +464,7 @@ function Cadastros({ from, to }: { from: string; to: string }) {
               {data.length === 0 && <tr><td colSpan={4} className="text-center py-10 text-muted-foreground">Nenhum cadastro no período</td></tr>}
             </tbody>
           </table>
+        </div>
         </CardContent>
       </Card>
     </div>
@@ -495,6 +501,7 @@ function Inadimplencia() {
           ])}><Download className="h-4 w-4 mr-2" /> Exportar CSV</Button>
         </CardHeader>
         <CardContent className="p-0">
+          <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
               <tr><th className="text-left px-4 py-3">Cliente</th><th className="text-left px-4 py-3">Descrição</th><th className="text-right px-4 py-3">Valor</th><th className="text-left px-4 py-3">Vencimento</th><th className="text-right px-4 py-3">Atraso</th></tr>
@@ -512,6 +519,7 @@ function Inadimplencia() {
               {data.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-muted-foreground">Nenhum inadimplente 🎉</td></tr>}
             </tbody>
           </table>
+        </div>
         </CardContent>
       </Card>
     </div>
@@ -520,6 +528,7 @@ function Inadimplencia() {
 
 function TabelaCobrancas({ items }: { items: any[] }) {
   return (
+    <div className="overflow-x-auto">
     <table className="w-full">
       <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
         <tr><th className="text-left px-4 py-3">Cliente</th><th className="text-left px-4 py-3">Descrição</th><th className="text-right px-4 py-3">Valor</th><th className="text-left px-4 py-3">Vencimento</th><th className="text-left px-4 py-3">Status</th></tr>
@@ -540,6 +549,7 @@ function TabelaCobrancas({ items }: { items: any[] }) {
         {items.length === 0 && <tr><td colSpan={5} className="text-center py-10 text-muted-foreground">Sem dados no período</td></tr>}
       </tbody>
     </table>
+    </div>
   );
 }
 

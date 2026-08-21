@@ -121,7 +121,7 @@ function Usuarios() {
   if (!loadingRole && !isMaster) {
     return (
       <AppLayout>
-        <div className="p-8 max-w-2xl">
+        <div className="p-4 sm:p-6 lg:p-8 max-w-2xl">
           <PageHeader title="Acesso restrito" subtitle="Esta área é exclusiva do usuário master." />
         </div>
       </AppLayout>
@@ -140,7 +140,7 @@ function Usuarios() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-[1400px]">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
         <PageHeader
           title="Usuários"
           subtitle="Gerencie assinaturas, permissões e acesso dos usuários cadastrados"

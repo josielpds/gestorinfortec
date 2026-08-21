@@ -354,7 +354,7 @@ function CobrancasPage() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-[1400px]">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <PageHeader
             title="Contas a Receber"
@@ -446,6 +446,7 @@ function CobrancasPage() {
                       : "Nenhum cliente encontrado"}
               </div>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
@@ -515,6 +516,7 @@ function CobrancasPage() {
                   })}
                 </tbody>
               </table>
+            </div>
             )}
           </CardContent>
         </Card>

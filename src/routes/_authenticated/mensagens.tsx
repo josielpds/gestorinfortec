@@ -56,7 +56,7 @@ export function MensagensPage() {
 
   return (
     <AppLayout>
-      <div className="p-8 max-w-[1400px]">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
         <PageHeader title="Disparar Mensagens" subtitle="Envie cobranças e lembretes pelo WhatsApp no dia do vencimento, 5 e 7 dias de atraso" />
 
         <Tabs defaultValue="hoje">
@@ -130,6 +130,7 @@ function ListaDispara({ items, template, tone, titulo }: { items: any[]; templat
         <Button onClick={sendAll}><Send className="h-4 w-4 mr-2" /> Disparar todas pelo WhatsApp</Button>
       </CardHeader>
       <CardContent className="p-0">
+        <div className="overflow-x-auto">
         <table className="w-full">
           <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
@@ -163,6 +164,7 @@ function ListaDispara({ items, template, tone, titulo }: { items: any[]; templat
             ))}
           </tbody>
         </table>
+      </div>
       </CardContent>
     </Card>
   );
