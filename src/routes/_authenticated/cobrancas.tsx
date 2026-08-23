@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Check, Send, Repeat, Pencil, CalendarPlus, CircleSlash, ChevronRight, ChevronDown, Upload, Search, CalendarRange } from "lucide-react";
+import { Plus, Trash2, Check, Send, Repeat, Pencil, CalendarPlus, CircleSlash, ChevronRight, ChevronDown, Upload, Search, CalendarRange, RotateCcw, TrendingUp, AlertTriangle, Clock } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { brl, fmtDate, effectiveStatus, todayISO } from "@/lib/format";
@@ -174,7 +174,6 @@ function CobrancasPage() {
         observacoes: c.observacoes ?? null,
         categoria_id: c.categoria_id ?? null,
         origem_id: c.id,
-        // apenas a última parcela mantém a recorrência ativa, evitando duplicidade
         recorrente: i === datas.length - 1,
         frequencia: i === datas.length - 1 ? c.frequencia : null,
         recorrencia_fim: i === datas.length - 1 ? c.recorrencia_fim ?? null : null,
@@ -190,12 +189,27 @@ function CobrancasPage() {
     onError: (e: any) => toast.error(e.message),
   });
 
+  // Marca a cobrança como paga e registra a data de pagamento
   const marcarPago = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("cobrancas").update({ status: "pago", data_pagamento: todayISO() }).eq("id", id);
+      const { error } = await supabase.from("cobrancas")
+        .update({ status: "pago", data_pagamento: todayISO() })
+        .eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success("Cobrança marcada como paga"); qc.invalidateQueries(); },
+    onSuccess: () => { toast.success("Cobrança marcada como paga ✓"); qc.invalidateQueries({ queryKey: ["cobrancas"] }); },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // Reverte a cobrança para pendente (estorno/re-abertura)
+  const marcarPendente = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("cobrancas")
+        .update({ status: "pendente", data_pagamento: null })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => { toast.success("Cobrança reaberta como pendente"); qc.invalidateQueries({ queryKey: ["cobrancas"] }); },
     onError: (e: any) => toast.error(e.message),
   });
 
@@ -227,8 +241,14 @@ function CobrancasPage() {
         <td className="px-4 py-3 text-muted-foreground">{c.categorias?.nome ?? "—"}</td>
         <td className="px-4 py-3 text-right font-semibold">{brl(c.valor)}</td>
         <td className="px-4 py-3">{fmtDate(c.vencimento)}</td>
-        <td className="px-4 py-3"><StatusBadge status={st} /></td>
+        <td className="px-4 py-3">
+          <StatusBadge status={st} />
+          {c.status === "pago" && c.data_pagamento && (
+            <div className="text-xs text-muted-foreground mt-0.5">em {fmtDate(c.data_pagamento)}</div>
+          )}
+        </td>
         <td className="px-4 py-3 text-right whitespace-nowrap">
+          {/* Enviar WhatsApp — só para cobranças não pagas */}
           {c.status !== "pago" && (
             <>
               <Button size="sm" variant="ghost" title="Enviar WhatsApp" onClick={() => {
@@ -239,6 +259,21 @@ function CobrancasPage() {
               }}><Send className="h-4 w-4 text-primary" /></Button>
               <Button size="sm" variant="ghost" title="Dar baixa (marcar como pago)" onClick={() => marcarPago.mutate(c.id)}>
                 <Check className="h-4 w-4 text-success" />
+              </Button>
+              <Button size="sm" variant="ghost" title="Editar" onClick={() => setEditing(c)}>
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+          {/* Reverter para pendente — só para cobranças pagas */}
+          {c.status === "pago" && (
+            <>
+              <Button size="sm" variant="ghost" title="Reverter para pendente" onClick={() => {
+                if (confirm("Reverter esta cobrança para pendente? Isso remove o registro de pagamento.")) {
+                  marcarPendente.mutate(c.id);
+                }
+              }}>
+                <RotateCcw className="h-4 w-4 text-warning-foreground" />
               </Button>
               <Button size="sm" variant="ghost" title="Editar" onClick={() => setEditing(c)}>
                 <Pencil className="h-4 w-4" />
@@ -313,6 +348,7 @@ function CobrancasPage() {
       abertas,
       pagas,
       totalAberto: abertas.reduce((s, c) => s + Number(c.valor), 0),
+      totalPago: pagas.reduce((s, c) => s + Number(c.valor), 0),
       proxima: abertasOrdenadas[0] ?? null,
       mesesFuturos: meses.size,
     };
@@ -326,12 +362,19 @@ function CobrancasPage() {
     .filter(({ grupo }) => !q || grupo.nome.toLowerCase().includes(q))
     .sort((a, b) => a.grupo.nome.localeCompare(b.grupo.nome));
 
+  // Métricas do período selecionado
   const recebidoMes = cobrancasDoMes
     .filter((c) => c.status === "pago")
     .reduce((s, c) => s + Number(c.valor), 0);
   const aReceberMes = cobrancasDoMes
     .filter((c) => c.status === "pendente")
     .reduce((s, c) => s + Number(c.valor), 0);
+  const emAtrasoMes = cobrancasDoMes
+    .filter((c) => effectiveStatus(c.vencimento, c.status) === "atrasado")
+    .reduce((s, c) => s + Number(c.valor), 0);
+  const totalMes = recebidoMes + aReceberMes + emAtrasoMes;
+  const taxaRecebimento = totalMes > 0 ? Math.round((recebidoMes / totalMes) * 100) : 0;
+
   const previsao = cobrancas
     .filter((c) => c.status === "pendente" && (!isMonthAll ? c.vencimento.slice(0, 7) > selectedMonth : true))
     .reduce((s, c) => s + Number(c.valor), 0);
@@ -393,30 +436,77 @@ function CobrancasPage() {
           <MonthFilter selectedMonth={selectedMonth} onChange={setSelectedMonth} allowAll={true} />
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-3 mb-6">
-          <Card><CardContent className="p-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Recebido no período</p>
-            <p className="text-2xl font-bold text-success mt-1">{brl(recebidoMes)}</p>
-          </CardContent></Card>
-          <Card><CardContent className="p-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">A receber no período</p>
-            <p className="text-2xl font-bold mt-1">{brl(aReceberMes)}</p>
-          </CardContent></Card>
-          <Card><CardContent className="p-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Previsão meses seguintes</p>
-            <p className="text-2xl font-bold text-primary mt-1">{brl(previsao)}</p>
-            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
-              {proximosMeses.map((m) => (
-                <button
-                  key={m.key}
-                  onClick={() => setSelectedMonth(m.key)}
-                  className="hover:underline text-left cursor-pointer"
-                >
-                  {m.mes}: <span className="font-medium text-foreground">{brl(m.total)}</span>
-                </button>
-              ))}
-            </div>
-          </CardContent></Card>
+        {/* Cards de resumo melhorados */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Recebido no período</p>
+                <div className="h-8 w-8 rounded-lg bg-success/15 flex items-center justify-center">
+                  <TrendingUp className="h-4 w-4 text-success" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-success">{brl(recebidoMes)}</p>
+              <div className="mt-2">
+                <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                  <span>Taxa de recebimento</span>
+                  <span className="font-semibold text-foreground">{taxaRecebimento}%</span>
+                </div>
+                <div className="w-full bg-muted rounded-full h-1.5">
+                  <div
+                    className="bg-success rounded-full h-1.5 transition-all"
+                    style={{ width: `${taxaRecebimento}%` }}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">A receber no período</p>
+                <div className="h-8 w-8 rounded-lg bg-info/10 flex items-center justify-center">
+                  <Clock className="h-4 w-4 text-info" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold">{brl(aReceberMes)}</p>
+              <p className="text-xs text-muted-foreground mt-1">cobranças pendentes no período</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Em atraso</p>
+                <div className="h-8 w-8 rounded-lg bg-destructive/10 flex items-center justify-center">
+                  <AlertTriangle className="h-4 w-4 text-destructive" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-destructive">{brl(emAtrasoMes)}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {cobrancasDoMes.filter((c) => effectiveStatus(c.vencimento, c.status) === "atrasado").length} cobranças vencidas
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold mb-2">Previsão próximos meses</p>
+              <p className="text-2xl font-bold text-primary">{brl(previsao)}</p>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
+                {proximosMeses.map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => setSelectedMonth(m.key)}
+                    className="hover:underline text-left cursor-pointer"
+                  >
+                    {m.mes}: <span className="font-medium text-foreground">{brl(m.total)}</span>
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -494,13 +584,16 @@ function CobrancasPage() {
                           <td className="px-4 py-3 text-right font-semibold">
                             {brl(resumo.totalAberto)}
                             <div className="text-xs font-normal text-muted-foreground">em aberto</div>
+                            {resumo.totalPago > 0 && (
+                              <div className="text-xs font-normal text-success">{brl(resumo.totalPago)} recebido</div>
+                            )}
                           </td>
                           <td className="px-4 py-3">{proxima ? fmtDate(proxima.vencimento) : "—"}</td>
                           <td className="px-4 py-3">
                             {proxima ? <StatusBadge status={effectiveStatus(proxima.vencimento, proxima.status)} /> : <StatusBadge status="pago" />}
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
-                            {proxima && (
+                            {proxima && proxima.status !== "pago" && (
                               <Button size="sm" variant="ghost" title="Dar baixa na próxima cobrança" onClick={() => marcarPago.mutate(proxima.id)}>
                                 <Check className="h-4 w-4 text-success" />
                               </Button>

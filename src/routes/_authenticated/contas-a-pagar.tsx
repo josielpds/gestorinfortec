@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { AppLayout, PageHeader } from "@/components/AppLayout";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { MonthFilter } from "@/components/MonthFilter";
-import { Plus, Trash2, CheckCircle2, RotateCcw, AlertTriangle, Wallet, CalendarClock, Pencil } from "lucide-react";
+import { Plus, Trash2, CheckCircle2, RotateCcw, AlertTriangle, Wallet, CalendarClock, Pencil, TrendingDown, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { brl, fmtDate, todayISO } from "@/lib/format";
 import { currentUserId } from "@/hooks/useCurrentUser";
@@ -93,7 +93,7 @@ function ContasPagarPage() {
         .eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success("Atualizado"); qc.invalidateQueries(); },
+    onSuccess: () => { toast.success("Status atualizado"); qc.invalidateQueries({ queryKey: ["contas_pagar"] }); },
     onError: (e: any) => toast.error(e.message),
   });
 
@@ -107,7 +107,6 @@ function ContasPagarPage() {
   });
 
   const atrasada = (c: Conta) => c.status === "pendente" && c.vencimento < hoje();
-  const mes = hoje().slice(0, 7);
 
   const matchesMes = (c: Conta) => {
     if (mesFilter === "todos") return true;
@@ -115,11 +114,29 @@ function ContasPagarPage() {
     return (ref ?? "").slice(0, 7) === mesFilter;
   };
 
+  // Métricas
   const aPagar = contas.filter((c) => c.status === "pendente" && matchesMes(c)).reduce((s, c) => s + Number(c.valor), 0);
   const emAtraso = contas.filter(atrasada).reduce((s, c) => s + Number(c.valor), 0);
-  const pagoMes = contas
-    .filter((c) => c.status === "pago" && matchesMes(c))
+  const pagoMes = contas.filter((c) => c.status === "pago" && matchesMes(c)).reduce((s, c) => s + Number(c.valor), 0);
+
+  // Previsão próximos 30 dias (pendentes não vencidos)
+  const hoje30 = new Date();
+  hoje30.setDate(hoje30.getDate() + 30);
+  const previsao30 = contas
+    .filter((c) => c.status === "pendente" && c.vencimento > hoje() && c.vencimento <= hoje30.toISOString().slice(0, 10))
     .reduce((s, c) => s + Number(c.valor), 0);
+
+  // Distribuição por categoria
+  const porCategoria = useMemo(() => {
+    const map: Record<string, number> = {};
+    contas.filter((c) => c.status === "pago" && matchesMes(c)).forEach((c) => {
+      const cat = c.categoria ?? "Sem categoria";
+      map[cat] = (map[cat] ?? 0) + Number(c.valor);
+    });
+    return Object.entries(map)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 5);
+  }, [contas, mesFilter]);
 
   const filtered = contas.filter((c) => {
     const statusOk =
@@ -128,6 +145,8 @@ function ContasPagarPage() {
         : c.status === filtro;
     return statusOk && matchesMes(c);
   });
+
+  const qtdAtrasadas = contas.filter(atrasada).length;
 
   return (
     <AppLayout>
@@ -148,11 +167,96 @@ function ContasPagarPage() {
           }
         />
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <SummaryCard label="Total a pagar" value={brl(aPagar)} tone="muted" icon={CalendarClock} />
-          <SummaryCard label="Em atraso" value={brl(emAtraso)} tone="destructive" icon={AlertTriangle} />
-          <SummaryCard label="Pago no mês" value={brl(pagoMes)} tone="success" icon={Wallet} />
+        {/* Métricas melhoradas */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">A Pagar no Período</p>
+                <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center">
+                  <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold">{brl(aPagar)}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {contas.filter((c) => c.status === "pendente" && matchesMes(c)).length} conta(s) pendente(s)
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className={emAtraso > 0 ? "border-destructive/30 bg-destructive/5" : ""}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Em Atraso</p>
+                <div className="h-8 w-8 rounded-lg bg-destructive/10 flex items-center justify-center">
+                  <AlertTriangle className="h-4 w-4 text-destructive" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-destructive">{brl(emAtraso)}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {qtdAtrasadas} conta(s) vencida(s)
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Pago no Período</p>
+                <div className="h-8 w-8 rounded-lg bg-success/15 flex items-center justify-center">
+                  <Wallet className="h-4 w-4 text-success" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-success">{brl(pagoMes)}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {contas.filter((c) => c.status === "pago" && matchesMes(c)).length} conta(s) quitada(s)
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Previsão 30 dias</p>
+                <div className="h-8 w-8 rounded-lg bg-warning/15 flex items-center justify-center">
+                  <Clock className="h-4 w-4 text-warning-foreground" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-warning-foreground">{brl(previsao30)}</p>
+              <p className="text-xs text-muted-foreground mt-1">próximas a vencer</p>
+            </CardContent>
+          </Card>
         </div>
+
+        {/* Distribuição por categoria (quando há dados) */}
+        {porCategoria.length > 0 && (
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <TrendingDown className="h-4 w-4 text-destructive" />
+                Despesas por Categoria (pagas no período)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {porCategoria.map(([cat, valor]) => {
+                  const pct = pagoMes > 0 ? Math.round((valor / pagoMes) * 100) : 0;
+                  return (
+                    <div key={cat}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-medium">{cat}</span>
+                        <span className="text-muted-foreground">{brl(valor)} <span className="text-xs">({pct}%)</span></span>
+                      </div>
+                      <div className="w-full bg-muted rounded-full h-1.5">
+                        <div className="bg-destructive/60 rounded-full h-1.5 transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="flex flex-wrap gap-2 mb-4">
           {(["todos", "pendente", "atrasado", "pago"] as const).map((s) => (
@@ -176,15 +280,18 @@ function ContasPagarPage() {
                     <th className="text-left px-4 py-3">Fornecedor</th>
                     <th className="text-left px-4 py-3">Categoria</th>
                     <th className="text-left px-4 py-3">Status</th>
+                    <th className="text-left px-4 py-3">Pago em</th>
                     <th className="text-right px-4 py-3">Valor</th>
                     <th className="text-right px-4 py-3">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {filtered.map((c) => (
-                    <tr key={c.id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3">{fmtDate(c.vencimento)}</td>
-                      <td className="px-4 py-3">{c.descricao}</td>
+                    <tr key={c.id} className={`hover:bg-muted/30 ${atrasada(c) ? "bg-destructive/5" : ""}`}>
+                      <td className="px-4 py-3">
+                        <span className={atrasada(c) ? "text-destructive font-medium" : ""}>{fmtDate(c.vencimento)}</span>
+                      </td>
+                      <td className="px-4 py-3 font-medium">{c.descricao}</td>
                       <td className="px-4 py-3 text-muted-foreground">{c.fornecedor || "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">{c.categoria ?? "—"}</td>
                       <td className="px-4 py-3">
@@ -195,8 +302,11 @@ function ContasPagarPage() {
                         ) : c.status === "cancelado" ? (
                           <Badge variant="outline">Cancelada</Badge>
                         ) : (
-                          <Badge variant="outline">Pendente</Badge>
+                          <Badge variant="outline" className="bg-warning/15 text-warning-foreground border-warning/30">Pendente</Badge>
                         )}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground text-sm">
+                        {c.pago_em ? fmtDate(c.pago_em) : "—"}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold">{brl(c.valor)}</td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -204,8 +314,8 @@ function ContasPagarPage() {
                           <Pencil className="h-4 w-4 text-primary" />
                         </Button>
                         {c.status === "pago" ? (
-                          <Button size="sm" variant="ghost" title="Reabrir" onClick={() => setStatus.mutate({ id: c.id, status: "pendente" })}>
-                            <RotateCcw className="h-4 w-4" />
+                          <Button size="sm" variant="ghost" title="Reabrir como pendente" onClick={() => setStatus.mutate({ id: c.id, status: "pendente" })}>
+                            <RotateCcw className="h-4 w-4 text-warning-foreground" />
                           </Button>
                         ) : (
                           <Button size="sm" variant="ghost" title="Dar baixa (marcar como pago)" onClick={() => setStatus.mutate({ id: c.id, status: "pago" })}>
@@ -303,25 +413,5 @@ function ContaForm({
         </Button>
       </DialogFooter>
     </DialogContent>
-  );
-}
-
-function SummaryCard({ label, value, tone, icon: Icon }: any) {
-  const tc: any = {
-    success: "text-success bg-success/10",
-    destructive: "text-destructive bg-destructive/10",
-  };
-  return (
-    <Card>
-      <CardContent className="pt-6 flex items-center justify-between">
-        <div>
-          <div className="text-xs uppercase tracking-wide font-semibold text-muted-foreground">{label}</div>
-          <div className="text-2xl font-bold mt-1">{value}</div>
-        </div>
-        <div className={"h-10 w-10 rounded-lg flex items-center justify-center " + (tc[tone] ?? "bg-muted text-muted-foreground")}>
-          <Icon className="h-5 w-5" />
-        </div>
-      </CardContent>
-    </Card>
   );
 }
