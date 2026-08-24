@@ -32,7 +32,7 @@ export function Dashboard() {
         supabase.from("clientes").select("id, ativo"),
         supabase.from("cobrancas").select("id, cliente_id, descricao, valor, vencimento, status, data_pagamento, clientes(nome)").order("vencimento"),
         supabase.from("contas_pagar").select("id, descricao, fornecedor, valor, vencimento, status, pago_em, categoria").order("vencimento"),
-        supabase.from("movimentacoes").select("tipo, valor, status, data"),
+        supabase.from("movimentacoes").select("tipo, valor, status, data, cobranca_id, conta_pagar_id"),
       ]);
       return {
         clientes: clientesRes.data ?? [],
@@ -70,27 +70,51 @@ export function Dashboard() {
   const ativos = clientes.filter((c: any) => c.ativo).length;
   const inativos = clientes.length - ativos;
 
-  // Valores a receber (apenas pendentes no período — NÃO contar atrasados duas vezes)
+  // Lançamentos manuais pendentes (apenas os que NÃO têm cobranca_id ou conta_pagar_id para não duplicar, caso existam, mas as props não estão na query de movimentacoes no dashboard? Estão sim se adicionarmos na query!)
+  // Ops, na query atual do dashboard: .select("tipo, valor, status, data, cobranca_id, conta_pagar_id") não tem as fk. Precisamos adicionar.
+  // Vamos primeiro usar as variáveis originais de cobrancas e contasPagar, e depois somar as movimentações avulsas pendentes.
+  const movsManuaisPendentes = isAll
+    ? movimentacoes.filter((m: any) => m.status === "pendente")
+    : movimentacoes.filter((m: any) => m.status === "pendente" && (m.data ?? "").startsWith(selectedMonth));
+
+  const pendenteReceberManual = movsManuaisPendentes
+    .filter((m: any) => m.tipo === "entrada")
+    .reduce((s, m) => s + Number(m.valor), 0);
+
+  const pendentePagarManual = movsManuaisPendentes
+    .filter((m: any) => m.tipo === "saida")
+    .reduce((s, m) => s + Number(m.valor), 0);
+
+  // Valores a receber programados (Cobranças pendentes + Entradas manuais pendentes)
   const aReceberMes = cobrancasMes
     .filter((c) => c.status === "pendente")
-    .reduce((s, c) => s + Number(c.valor), 0);
+    .reduce((s, c) => s + Number(c.valor), 0) + pendenteReceberManual;
 
   const emAtrasoReceber = cobrancas
     .filter((c) => effectiveStatus(c.vencimento, c.status) === "atrasado")
     .reduce((s, c) => s + Number(c.valor), 0);
 
-  // Valores a pagar (pendentes no período)
+  // Valores a pagar programados (Contas a Pagar pendentes + Saídas manuais pendentes)
   const aPagarMes = contasPagarMes
     .filter((cp) => cp.status === "pendente")
-    .reduce((s, cp) => s + Number(cp.valor), 0);
+    .reduce((s, cp) => s + Number(cp.valor), 0) + pendentePagarManual;
 
   const emAtrasoPagar = contasPagar
     .filter((cp) => cp.status === "pendente" && cp.vencimento < today)
     .reduce((s, cp) => s + Number(cp.valor), 0);
 
-  // Recebido e pago no período
-  const recebidoMes = cobrancasPagasMes.reduce((s, c) => s + Number(c.valor), 0);
-  const pagoMes = contasPagasMes.reduce((s, cp) => s + Number(cp.valor), 0);
+  // Recebido e pago no período (agora vindo EXCLUSIVAMENTE das movimentações confirmadas para refletir a aba Lançamentos de Entradas e Saídas)
+  const movsConfirmadas = isAll
+    ? movimentacoes.filter((m: any) => !m.status || m.status === "pago")
+    : movimentacoes.filter((m: any) => (!m.status || m.status === "pago") && (m.data ?? "").startsWith(selectedMonth));
+
+  const recebidoMes = movsConfirmadas
+    .filter((m: any) => m.tipo === "entrada")
+    .reduce((s, m) => s + Number(m.valor), 0);
+
+  const pagoMes = movsConfirmadas
+    .filter((m: any) => m.tipo === "saida")
+    .reduce((s, m) => s + Number(m.valor), 0);
 
   // Saldo realizado do caixa
   const saldoRealizado = recebidoMes - pagoMes;
@@ -99,11 +123,7 @@ export function Dashboard() {
   const totalFaturadoMes = cobrancasMes.reduce((s, c) => s + Number(c.valor), 0);
   const taxaRecebimento = totalFaturadoMes > 0 ? Math.round((recebidoMes / totalFaturadoMes) * 100) : 0;
 
-  // Lançamentos manuais de entrada pendentes
-  // (apenas conta se o status estiver explicitamente "pendente" — não conta ausência de coluna)
-  const pendenteReceberManual = movimentacoes
-    .filter((m) => m.tipo === "entrada" && m.status === "pendente")
-    .reduce((s, m) => s + Number(m.valor), 0);
+
 
   const atrasadas = cobrancas.filter((c) => effectiveStatus(c.vencimento, c.status) === "atrasado");
   const vencemHoje = cobrancas.filter((c) => c.status === "pendente" && c.vencimento === today);
@@ -230,9 +250,6 @@ export function Dashboard() {
                 {brl(saldoRealizado)}
               </div>
               <p className="text-xs text-muted-foreground mt-1">Recebimentos menos despesas pagas</p>
-              {pendenteReceberManual > 0 && (
-                <p className="text-xs text-warning-foreground mt-1">⚠ {brl(pendenteReceberManual)} em lançamentos pendentes</p>
-              )}
             </CardContent>
           </Card>
 
