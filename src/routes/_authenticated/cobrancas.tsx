@@ -42,7 +42,7 @@ function CobrancasPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Cobranca | null>(null);
   const [gerando, setGerando] = useState<Cobranca | null>(null);
-  const [filter, setFilter] = useState<string>("todos");
+  const [filter, setFilter] = useState<string>("aberto");
   const [selectedMonth, setSelectedMonth] = useState<string>(() => todayISO().slice(0, 7));
   const [expandido, setExpandido] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -189,28 +189,71 @@ function CobrancasPage() {
     onError: (e: any) => toast.error(e.message),
   });
 
-  // Marca a cobrança como paga e registra a data de pagamento
+  // Marca a cobrança como paga — atualização otimista imediata + sync com servidor
   const marcarPago = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("cobrancas")
-        .update({ status: "pago", data_pagamento: todayISO() })
-        .eq("id", id);
+      const hoje = todayISO();
+      const { data, error } = await supabase
+        .from("cobrancas")
+        .update({ status: "pago", data_pagamento: hoje })
+        .eq("id", id)
+        .select("id, status, data_pagamento")
+        .single();
       if (error) throw error;
+      return data;
     },
-    onSuccess: () => { toast.success("Cobrança marcada como paga ✓"); qc.invalidateQueries({ queryKey: ["cobrancas"] }); },
-    onError: (e: any) => toast.error(e.message),
+    // Atualiza o cache local ANTES da resposta do servidor (optimistic update)
+    onMutate: async (id: string) => {
+      await qc.cancelQueries({ queryKey: ["cobrancas"] });
+      const prev = qc.getQueryData<Cobranca[]>(["cobrancas"]);
+      qc.setQueryData<Cobranca[]>(["cobrancas"], (old = []) =>
+        old.map((c) =>
+          c.id === id ? { ...c, status: "pago", data_pagamento: todayISO() } : c
+        )
+      );
+      return { prev };
+    },
+    onSuccess: () => {
+      toast.success("Cobrança marcada como paga ✓");
+      qc.invalidateQueries();
+    },
+    onError: (e: any, _id, ctx: any) => {
+      // Reverte o cache local se o servidor falhar
+      if (ctx?.prev) qc.setQueryData(["cobrancas"], ctx.prev);
+      toast.error("Erro ao marcar como pago: " + e.message);
+    },
   });
 
-  // Reverte a cobrança para pendente (estorno/re-abertura)
+  // Reverte a cobrança para pendente — atualização otimista imediata + sync
   const marcarPendente = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("cobrancas")
+      const { data, error } = await supabase
+        .from("cobrancas")
         .update({ status: "pendente", data_pagamento: null })
-        .eq("id", id);
+        .eq("id", id)
+        .select("id, status, data_pagamento")
+        .single();
       if (error) throw error;
+      return data;
     },
-    onSuccess: () => { toast.success("Cobrança reaberta como pendente"); qc.invalidateQueries({ queryKey: ["cobrancas"] }); },
-    onError: (e: any) => toast.error(e.message),
+    onMutate: async (id: string) => {
+      await qc.cancelQueries({ queryKey: ["cobrancas"] });
+      const prev = qc.getQueryData<Cobranca[]>(["cobrancas"]);
+      qc.setQueryData<Cobranca[]>(["cobrancas"], (old = []) =>
+        old.map((c) =>
+          c.id === id ? { ...c, status: "pendente", data_pagamento: null } : c
+        )
+      );
+      return { prev };
+    },
+    onSuccess: () => {
+      toast.success("Cobrança revertida para pendente");
+      qc.invalidateQueries();
+    },
+    onError: (e: any, _id, ctx: any) => {
+      if (ctx?.prev) qc.setQueryData(["cobrancas"], ctx.prev);
+      toast.error("Erro ao reverter: " + e.message);
+    },
   });
 
   const remove = useMutation({
@@ -305,6 +348,7 @@ function CobrancasPage() {
     : cobrancas.filter((c) => (c.vencimento ?? "").startsWith(selectedMonth) || (c.data_pagamento ?? "").startsWith(selectedMonth));
 
   const filtered = cobrancasDoMes.filter((c) => {
+    if (filter === "aberto") return effectiveStatus(c.vencimento, c.status) !== "pago" && c.status !== "cancelado";
     if (filter === "todos") return true;
     if (filter === "recorrente") return !!c.recorrente || !!c.origem_id;
     return effectiveStatus(c.vencimento, c.status) === filter;
@@ -354,7 +398,7 @@ function CobrancasPage() {
     };
   };
 
-  const somenteAberto = filter === "todos";
+  const somenteAberto = filter === "aberto";
   const q = search.trim().toLowerCase();
   const clientesFiltrados = grupos
     .map((g) => ({ grupo: g, resumo: resumoCliente(g) }))
@@ -511,9 +555,9 @@ function CobrancasPage() {
 
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex flex-wrap gap-2">
-            {["todos", "pendente", "atrasado", "pago", "cancelado", "recorrente"].map((s) => (
+            {["aberto", "todos", "pendente", "atrasado", "pago", "cancelado", "recorrente"].map((s) => (
               <Button key={s} variant={filter === s ? "default" : "outline"} size="sm" onClick={() => setFilter(s)}>
-                {s === "todos" ? "Todas" : s === "recorrente" ? "Mensalidades" : s.charAt(0).toUpperCase() + s.slice(1)}
+                {s === "aberto" ? "Em Aberto" : s === "todos" ? "Todas" : s === "recorrente" ? "Mensalidades" : s.charAt(0).toUpperCase() + s.slice(1)}
               </Button>
             ))}
           </div>
@@ -593,11 +637,33 @@ function CobrancasPage() {
                             {proxima ? <StatusBadge status={effectiveStatus(proxima.vencimento, proxima.status)} /> : <StatusBadge status="pago" />}
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
+                            {/* Dar baixa na próxima cobrança aberta */}
                             {proxima && proxima.status !== "pago" && (
-                              <Button size="sm" variant="ghost" title="Dar baixa na próxima cobrança" onClick={() => marcarPago.mutate(proxima.id)}>
+                              <Button
+                                size="sm" variant="ghost"
+                                title="Dar baixa na próxima cobrança"
+                                onClick={() => marcarPago.mutate(proxima.id)}
+                                disabled={marcarPago.isPending}
+                              >
                                 <Check className="h-4 w-4 text-success" />
                               </Button>
                             )}
+                            {/* Reverter última paga para pendente */}
+                            {!proxima && resumo.pagas.length > 0 && (() => {
+                              const ultima = [...resumo.pagas].sort((a, b) => (b.data_pagamento ?? b.vencimento).localeCompare(a.data_pagamento ?? a.vencimento))[0];
+                              return (
+                                <Button
+                                  size="sm" variant="ghost"
+                                  title="Reverter última cobrança para pendente"
+                                  onClick={() => {
+                                    if (confirm("Reverter esta cobrança para pendente?")) marcarPendente.mutate(ultima.id);
+                                  }}
+                                  disabled={marcarPendente.isPending}
+                                >
+                                  <RotateCcw className="h-4 w-4 text-warning-foreground" />
+                                </Button>
+                              );
+                            })()}
                             <Button size="sm" variant="ghost" title={aberto ? "Ocultar cobranças" : "Ver cobranças"} onClick={() => setExpandido(aberto ? null : key)}>
                               {aberto ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                             </Button>
