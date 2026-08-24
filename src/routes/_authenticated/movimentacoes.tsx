@@ -174,8 +174,14 @@ function MovimentacoesPage() {
   const toggleStatus = useMutation({
     mutationFn: async (m: Mov) => {
       const novo = (m.status || "pago") === "pago" ? "pendente" : "pago";
-      await updateMovimentacaoSafely(m.id, { status: novo });
-      return novo;
+      const { data, error } = await supabase
+        .from("movimentacoes")
+        .update({ status: novo })
+        .eq("id", m.id)
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
     },
     onMutate: async (m: Mov) => {
       await qc.cancelQueries({ queryKey: ["movimentacoes"] });
@@ -314,10 +320,14 @@ function MovimentacoesPage() {
                                 : "Clique para alternar pago/pendente"
                             }
                             onClick={() => {
-                              if (m.cobranca_id || m.conta_pagar_id) return;
+                              if (m.cobranca_id || m.conta_pagar_id) {
+                                toast.info("Edite a cobrança ou conta a pagar vinculada a este lançamento.");
+                                return;
+                              }
                               toggleStatus.mutate(m);
                             }}
-                            className="h-auto p-0 hover:bg-transparent"
+                            className={"h-auto p-0 hover:bg-transparent " + ((m.cobranca_id || m.conta_pagar_id) ? "opacity-70 cursor-not-allowed" : "")}
+                            disabled={toggleStatus.isPending && toggleStatus.variables?.id === m.id}
                           >
                             <StatusBadge status={m.status} />
                           </Button>
