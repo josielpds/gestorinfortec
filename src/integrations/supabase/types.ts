@@ -232,6 +232,8 @@ export type Database = {
           data: string
           descricao: string
           id: string
+          observacoes: string | null
+          status: string
           tipo: Database["public"]["Enums"]["movimentacao_tipo"]
           user_id: string
           valor: number
@@ -245,6 +247,8 @@ export type Database = {
           data?: string
           descricao: string
           id?: string
+          observacoes?: string | null
+          status?: string
           tipo: Database["public"]["Enums"]["movimentacao_tipo"]
           user_id: string
           valor: number
@@ -258,6 +262,8 @@ export type Database = {
           data?: string
           descricao?: string
           id?: string
+          observacoes?: string | null
+          status?: string
           tipo?: Database["public"]["Enums"]["movimentacao_tipo"]
           user_id?: string
           valor?: number
