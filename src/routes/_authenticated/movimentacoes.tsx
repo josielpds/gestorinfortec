@@ -90,6 +90,8 @@ function MovimentacoesPage() {
       const { data, error } = await supabase
         .from("movimentacoes")
         .select("*, clientes(nome)")
+        .is("cobranca_id", null)
+        .is("conta_pagar_id", null)
         .order("data", { ascending: false });
       if (error) throw error;
       return data as unknown as Mov[];
