@@ -114,7 +114,7 @@ function MovimentacoesPage() {
       const payload: any = {
         user_id,
         tipo: p.tipo,
-        status: p.status || "pago",
+        status: p.status || "pendente",
         valor: p.valor,
         descricao: p.descricao,
         data: p.data || todayISO(),
@@ -426,7 +426,7 @@ function MovForm({
   submitLabel?: string;
 }) {
   const [tipo, setTipo] = useState<"entrada" | "saida">(initial?.tipo ?? "entrada");
-  const [status, setStatus] = useState<"pago" | "pendente">(initial?.status ?? "pago");
+  const [status, setStatus] = useState<"pago" | "pendente">(initial?.status ?? "pendente");
   const [valor, setValor] = useState(initial ? String(initial.valor) : "");
   const [descricao, setDescricao] = useState(initial?.descricao ?? "");
   const [categoria, setCategoria] = useState(initial?.categoria ?? "");
