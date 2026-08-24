@@ -286,86 +286,76 @@ function MovimentacoesPage() {
                       <th className="text-left px-4 py-3">Tipo</th>
                       <th className="text-left px-4 py-3">Descrição</th>
                       <th className="text-left px-4 py-3">Categoria</th>
-                      <th className="text-left px-4 py-3">Situação</th>
                       <th className="text-right px-4 py-3">Valor</th>
                       <th className="text-right px-4 py-3">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {filtered.map((m) => (
-                      <tr key={m.id} className="hover:bg-muted/30">
-                        <td className="px-4 py-3">{fmtDate(m.data)}</td>
-                        <td className="px-4 py-3">
-                          <Badge
-                            variant="outline"
-                            className={
-                              m.tipo === "entrada"
-                                ? "bg-success/15 text-success border-success/30"
-                                : "bg-destructive/10 text-destructive border-destructive/30"
-                            }
-                          >
-                            {m.tipo === "entrada" ? "Entrada" : "Saída"}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          {m.descricao}
-                          {m.clientes?.nome ? <span className="text-muted-foreground"> · {m.clientes.nome}</span> : null}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">{m.categoria ?? "—"}</td>
-                        <td className="px-4 py-3">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            title={
-                              m.cobranca_id || m.conta_pagar_id
-                                ? "Vinculado a cobrança/conta"
-                                : "Clique para alternar pago/pendente"
-                            }
-                            onClick={() => {
-                              if (m.cobranca_id || m.conta_pagar_id) {
-                                toast.info("Edite a cobrança ou conta a pagar vinculada a este lançamento.");
-                                return;
+                    {filtered.map((m) => {
+                      const isPago = !m.status || m.status === "pago";
+                      return (
+                        <tr key={m.id} className="hover:bg-muted/30">
+                          <td className="px-4 py-3">{fmtDate(m.data)}</td>
+                          <td className="px-4 py-3">
+                            <Badge
+                              variant="outline"
+                              className={
+                                m.tipo === "entrada"
+                                  ? "bg-success/15 text-success border-success/30"
+                                  : "bg-destructive/10 text-destructive border-destructive/30"
                               }
-                              toggleStatus.mutate(m);
-                            }}
-                            className={"h-auto p-0 hover:bg-transparent " + ((m.cobranca_id || m.conta_pagar_id) ? "opacity-70 cursor-not-allowed" : "")}
-                            disabled={toggleStatus.isPending && toggleStatus.variables?.id === m.id}
+                            >
+                              {m.tipo === "entrada" ? "Entrada" : "Saída"}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="font-medium">{m.descricao}</span>
+                            {m.clientes?.nome ? <span className="text-muted-foreground"> · {m.clientes.nome}</span> : null}
+                            {!isPago && (
+                              <Badge variant="outline" className="ml-2 bg-warning/15 text-warning-foreground border-warning/30 text-[10px] py-0">
+                                Pendente
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{m.categoria ?? "—"}</td>
+                          <td
+                            className={
+                              "px-4 py-3 text-right font-semibold " +
+                              (m.tipo === "entrada" ? "text-success" : "text-destructive")
+                            }
                           >
-                            <StatusBadge status={m.status} />
-                          </Button>
-                        </td>
-                        <td
-                          className={
-                            "px-4 py-3 text-right font-semibold " +
-                            (m.tipo === "entrada" ? "text-success" : "text-destructive")
-                          }
-                        >
-                          {m.tipo === "entrada" ? "+" : "-"} {brl(m.valor)}
-                        </td>
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          {!(m.cobranca_id || m.conta_pagar_id) && m.status === "pendente" && (
+                            {m.tipo === "entrada" ? "+" : "-"} {brl(m.valor)}
+                          </td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            {/* Botão verdinho de dar baixa se pendente */}
+                            {!(m.cobranca_id || m.conta_pagar_id) && m.status === "pendente" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title="Dar baixa (marcar como pago)"
+                                className="bg-success text-success-foreground hover:bg-success/90 h-8 px-2.5 mr-1 font-medium text-xs shadow-xs"
+                                onClick={() => toggleStatus.mutate(m)}
+                                disabled={toggleStatus.isPending && toggleStatus.variables?.id === m.id}
+                              >
+                                <Check className="h-3.5 w-3.5 mr-1" />
+                                Baixar
+                              </Button>
+                            )}
+                            {/* Botão de reverter se pago */}
+                            {!(m.cobranca_id || m.conta_pagar_id) && isPago && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                title="Reverter para pendente"
+                                className="h-8 px-2 mr-1 text-xs text-muted-foreground hover:text-warning-foreground"
+                                onClick={() => toggleStatus.mutate(m)}
+                                disabled={toggleStatus.isPending && toggleStatus.variables?.id === m.id}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5 mr-1 text-warning-foreground" />
+                                Reverter
+                              </Button>
+                            )}
                             <Button
-                              size="sm"
-                              variant="ghost"
-                              title="Dar baixa"
-                              onClick={() => toggleStatus.mutate(m)}
-                              disabled={toggleStatus.isPending && toggleStatus.variables?.id === m.id}
-                            >
-                              <Check className="h-4 w-4 text-success" />
-                            </Button>
-                          )}
-                          {!(m.cobranca_id || m.conta_pagar_id) && m.status === "pago" && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              title="Reverter para pendente"
-                              onClick={() => toggleStatus.mutate(m)}
-                              disabled={toggleStatus.isPending && toggleStatus.variables?.id === m.id}
-                            >
-                              <RotateCcw className="h-4 w-4 text-warning-foreground" />
-                            </Button>
-                          )}
-                          <Button
                             size="sm"
                             variant="ghost"
                             title="Editar"
@@ -394,7 +384,8 @@ function MovimentacoesPage() {
                           </Button>
                         </td>
                       </tr>
-                    ))}
+                    );
+                  })}
                   </tbody>
                 </table>
               </div>
@@ -559,39 +550,24 @@ function MovForm({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label>Categoria</Label>
-            <Select value={categoria} onValueChange={setCategoria}>
-              <SelectTrigger>
-                <SelectValue placeholder="Selecione..." />
-              </SelectTrigger>
-              <SelectContent>
-                {catsFiltradas.length === 0 ? (
-                  <SelectItem value="geral" disabled>Nenhuma categoria</SelectItem>
-                ) : (
-                  catsFiltradas.map((c: any) => (
-                    <SelectItem key={c.id || c.nome} value={c.nome}>
-                      {c.nome}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label>Situação *</Label>
-            <Select value={status} onValueChange={(v: "pago" | "pendente") => setStatus(v)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pago">Pago / Realizado</SelectItem>
-                <SelectItem value="pendente">Pendente</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <div>
+          <Label>Categoria</Label>
+          <Select value={categoria} onValueChange={setCategoria}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione..." />
+            </SelectTrigger>
+            <SelectContent>
+              {catsFiltradas.length === 0 ? (
+                <SelectItem value="geral" disabled>Nenhuma categoria</SelectItem>
+              ) : (
+                catsFiltradas.map((c: any) => (
+                  <SelectItem key={c.id || c.nome} value={c.nome}>
+                    {c.nome}
+                  </SelectItem>
+                ))
+              )}
+            </SelectContent>
+          </Select>
         </div>
 
         {tipo === "entrada" && clientes.length > 0 && (
