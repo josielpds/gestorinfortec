@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { MonthFilter } from "@/components/MonthFilter";
-import { Plus, Trash2, TrendingUp, TrendingDown, Pencil, ArrowUpCircle, ArrowDownCircle } from "lucide-react";
+import { Plus, Trash2, TrendingUp, TrendingDown, Pencil, ArrowUpCircle, ArrowDownCircle, Check, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { brl, fmtDate, todayISO } from "@/lib/format";
 import { currentUserId } from "@/hooks/useCurrentUser";
