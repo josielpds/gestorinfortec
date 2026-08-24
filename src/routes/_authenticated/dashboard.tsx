@@ -32,7 +32,7 @@ export function Dashboard() {
         supabase.from("clientes").select("id, ativo"),
         supabase.from("cobrancas").select("id, cliente_id, descricao, valor, vencimento, status, data_pagamento, clientes(nome)").order("vencimento"),
         supabase.from("contas_pagar").select("id, descricao, fornecedor, valor, vencimento, status, pago_em, categoria").order("vencimento"),
-        supabase.from("movimentacoes").select("tipo, valor, status, data, cobranca_id, conta_pagar_id"),
+        supabase.from("movimentacoes").select("*"),
       ]);
       return {
         clientes: clientesRes.data ?? [],
@@ -50,7 +50,7 @@ export function Dashboard() {
 
   const isAll = selectedMonth === "todos";
 
-  // Filtrar por mês
+  // Filtrar cobranças e contas a pagar por mês
   const cobrancasMes = isAll
     ? cobrancas
     : cobrancas.filter((c) => (c.vencimento ?? "").startsWith(selectedMonth));
@@ -70,60 +70,63 @@ export function Dashboard() {
   const ativos = clientes.filter((c: any) => c.ativo).length;
   const inativos = clientes.length - ativos;
 
-  // Lançamentos manuais pendentes (apenas os que NÃO têm cobranca_id ou conta_pagar_id para não duplicar, caso existam, mas as props não estão na query de movimentacoes no dashboard? Estão sim se adicionarmos na query!)
-  // Ops, na query atual do dashboard: .select("tipo, valor, status, data, cobranca_id, conta_pagar_id") não tem as fk. Precisamos adicionar.
-  // Vamos primeiro usar as variáveis originais de cobrancas e contasPagar, e depois somar as movimentações avulsas pendentes.
-  const movsManuaisPendentes = isAll
-    ? movimentacoes.filter((m: any) => m.status === "pendente")
-    : movimentacoes.filter((m: any) => m.status === "pendente" && (m.data ?? "").startsWith(selectedMonth));
+  // Movimentações no período selecionado
+  const movsPeriodo = isAll
+    ? movimentacoes
+    : movimentacoes.filter((m: any) => (m.data ?? "").startsWith(selectedMonth));
 
-  const pendenteReceberManual = movsManuaisPendentes
-    .filter((m: any) => m.tipo === "entrada")
+  // Entradas e saídas manuais confirmadas/pagas
+  const entradasConfirmadasManuais = movsPeriodo
+    .filter((m: any) => m.tipo === "entrada" && (!m.status || m.status === "pago" || m.status === "recebido"))
     .reduce((s, m) => s + Number(m.valor), 0);
 
-  const pendentePagarManual = movsManuaisPendentes
-    .filter((m: any) => m.tipo === "saida")
+  const saidasConfirmadasManuais = movsPeriodo
+    .filter((m: any) => m.tipo === "saida" && (!m.status || m.status === "pago"))
     .reduce((s, m) => s + Number(m.valor), 0);
 
-  // Valores a receber programados (Cobranças pendentes + Entradas manuais pendentes)
-  const aReceberMes = cobrancasMes
+  // Entradas e saídas manuais pendentes
+  const pendenteReceberManual = movsPeriodo
+    .filter((m: any) => m.tipo === "entrada" && m.status === "pendente")
+    .reduce((s, m) => s + Number(m.valor), 0);
+
+  const pendentePagarManual = movsPeriodo
+    .filter((m: any) => m.tipo === "saida" && m.status === "pendente")
+    .reduce((s, m) => s + Number(m.valor), 0);
+
+  // 1. Recebido no Mês (Cobranças Pagas + Entradas Avulsas Pagas)
+  const recebidoCobrancas = cobrancasPagasMes.reduce((s, c) => s + Number(c.valor), 0);
+  const recebidoMes = recebidoCobrancas + entradasConfirmadasManuais;
+
+  // 2. Despesas Pagas no Mês (Contas a Pagar Pagas + Saídas Avulsas Pagas)
+  const despesasContasPagas = contasPagasMes.reduce((s, cp) => s + Number(cp.valor), 0);
+  const pagoMes = despesasContasPagas + saidasConfirmadasManuais;
+
+  // 3. A Receber Pendente no Mês (Cobranças Pendentes + Entradas Avulsas Pendentes)
+  const cobrancasPendentes = cobrancasMes
     .filter((c) => c.status === "pendente")
-    .reduce((s, c) => s + Number(c.valor), 0) + pendenteReceberManual;
+    .reduce((s, c) => s + Number(c.valor), 0);
+  const aReceberMes = cobrancasPendentes + pendenteReceberManual;
 
   const emAtrasoReceber = cobrancas
     .filter((c) => effectiveStatus(c.vencimento, c.status) === "atrasado")
     .reduce((s, c) => s + Number(c.valor), 0);
 
-  // Valores a pagar programados (Contas a Pagar pendentes + Saídas manuais pendentes)
-  const aPagarMes = contasPagarMes
+  // 4. A Pagar Pendente no Mês (Contas a Pagar Pendentes + Saídas Avulsas Pendentes)
+  const contasPendentes = contasPagarMes
     .filter((cp) => cp.status === "pendente")
-    .reduce((s, cp) => s + Number(cp.valor), 0) + pendentePagarManual;
+    .reduce((s, cp) => s + Number(cp.valor), 0);
+  const aPagarMes = contasPendentes + pendentePagarManual;
 
   const emAtrasoPagar = contasPagar
     .filter((cp) => cp.status === "pendente" && cp.vencimento < today)
     .reduce((s, cp) => s + Number(cp.valor), 0);
 
-  // Recebido e pago no período (agora vindo EXCLUSIVAMENTE das movimentações confirmadas para refletir a aba Lançamentos de Entradas e Saídas)
-  const movsConfirmadas = isAll
-    ? movimentacoes.filter((m: any) => !m.status || m.status === "pago")
-    : movimentacoes.filter((m: any) => (!m.status || m.status === "pago") && (m.data ?? "").startsWith(selectedMonth));
-
-  const recebidoMes = movsConfirmadas
-    .filter((m: any) => m.tipo === "entrada")
-    .reduce((s, m) => s + Number(m.valor), 0);
-
-  const pagoMes = movsConfirmadas
-    .filter((m: any) => m.tipo === "saida")
-    .reduce((s, m) => s + Number(m.valor), 0);
-
-  // Saldo realizado do caixa
+  // 5. Saldo Realizado do Caixa (Tudo recebido - Tudo pago)
   const saldoRealizado = recebidoMes - pagoMes;
 
-  // Taxa de recebimento do mês
-  const totalFaturadoMes = cobrancasMes.reduce((s, c) => s + Number(c.valor), 0);
-  const taxaRecebimento = totalFaturadoMes > 0 ? Math.round((recebidoMes / totalFaturadoMes) * 100) : 0;
-
-
+  // 6. Taxa de recebimento do mês
+  const totalFaturadoMes = cobrancasMes.reduce((s, c) => s + Number(c.valor), 0) + entradasConfirmadasManuais + pendenteReceberManual;
+  const taxaRecebimento = totalFaturadoMes > 0 ? Math.min(100, Math.round((recebidoMes / totalFaturadoMes) * 100)) : 0;
 
   const atrasadas = cobrancas.filter((c) => effectiveStatus(c.vencimento, c.status) === "atrasado");
   const vencemHoje = cobrancas.filter((c) => c.status === "pendente" && c.vencimento === today);
@@ -142,16 +145,26 @@ export function Dashboard() {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const label = d.toLocaleDateString("pt-BR", { month: "short" });
-      const recebido = cobrancas
+      const recCobs = cobrancas
         .filter((c) => c.status === "pago" && (c.data_pagamento ?? c.vencimento ?? "").startsWith(key))
         .reduce((s, c) => s + Number(c.valor), 0);
-      const despesas = contasPagar
+      const recMovs = movimentacoes
+        .filter((m: any) => m.tipo === "entrada" && (!m.status || m.status === "pago" || m.status === "recebido") && (m.data ?? "").startsWith(key))
+        .reduce((s, m: any) => s + Number(m.valor), 0);
+      const recebido = recCobs + recMovs;
+
+      const despContas = contasPagar
         .filter((cp) => cp.status === "pago" && (cp.pago_em ?? cp.vencimento ?? "").startsWith(key))
         .reduce((s, cp) => s + Number(cp.valor), 0);
+      const despMovs = movimentacoes
+        .filter((m: any) => m.tipo === "saida" && (!m.status || m.status === "pago") && (m.data ?? "").startsWith(key))
+        .reduce((s, m: any) => s + Number(m.valor), 0);
+      const despesas = despContas + despMovs;
+
       meses.push({ key, label, recebido, despesas, saldo: recebido - despesas });
     }
     return meses;
-  }, [cobrancas, contasPagar]);
+  }, [cobrancas, contasPagar, movimentacoes]);
 
   // Próximas cobranças a receber no mês
   const porCliente = new Map<
