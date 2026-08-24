@@ -175,14 +175,25 @@ function MovimentacoesPage() {
     mutationFn: async (m: Mov) => {
       const novo = (m.status || "pago") === "pago" ? "pendente" : "pago";
       await updateMovimentacaoSafely(m.id, { status: novo });
+      return novo;
+    },
+    onMutate: async (m: Mov) => {
+      await qc.cancelQueries({ queryKey: ["movimentacoes"] });
+      const prev = qc.getQueryData<Mov[]>(["movimentacoes"]);
+      const novo = (m.status || "pago") === "pago" ? "pendente" : "pago";
+      qc.setQueryData<Mov[]>(["movimentacoes"], (old = []) =>
+        old.map((item) => (item.id === m.id ? { ...item, status: novo } : item))
+      );
+      return { prev };
     },
     onSuccess: () => {
       toast.success("Situação atualizada");
-      qc.invalidateQueries({ queryKey: ["movimentacoes"] });
-      qc.invalidateQueries({ queryKey: ["dashboard"] });
-      qc.invalidateQueries({ queryKey: ["relatorios"] });
+      qc.invalidateQueries(); // Invalida todos os caches relacionados (movimentacoes, dashboard, relatorios)
     },
-    onError: (e: any) => toast.error(e.message),
+    onError: (e: any, _m, ctx: any) => {
+      if (ctx?.prev) qc.setQueryData(["movimentacoes"], ctx.prev);
+      toast.error(e.message);
+    },
   });
 
   const mesMatch = (m: Mov) => mesFilter === "todos" || (m.data ?? "").slice(0, 7) === mesFilter;
