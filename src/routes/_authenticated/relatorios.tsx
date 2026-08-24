@@ -87,20 +87,45 @@ function exportCSV(filename: string, rows: any[], headers: { key: string; label:
 function DRE({ from, to }: { from: string; to: string }) {
   const { data: cobrancasPagas = [] } = useQuery({
     queryKey: ["dre-cob", from, to],
-    queryFn: async () => ((await supabase.from("cobrancas").select("*, categorias(nome)")
-      .eq("status", "pago").gte("data_pagamento", from).lte("data_pagamento", to)).data ?? []) as any[],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("cobrancas")
+        .select("*, categorias(nome)")
+        .eq("status", "pago");
+      if (error) throw error;
+      return ((data ?? []) as any[]).filter((c) => {
+        const d = c.data_pagamento || c.vencimento || "";
+        return d >= from && d <= to;
+      });
+    },
   });
 
   const { data: contasPagas = [] } = useQuery({
     queryKey: ["dre-cp", from, to],
-    queryFn: async () => ((await supabase.from("contas_pagar").select("*")
-      .eq("status", "pago").gte("pago_em", from).lte("pago_em", to)).data ?? []) as any[],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("contas_pagar")
+        .select("*")
+        .eq("status", "pago");
+      if (error) throw error;
+      return ((data ?? []) as any[]).filter((cp) => {
+        const d = cp.pago_em || cp.vencimento || "";
+        return d >= from && d <= to;
+      });
+    },
   });
 
   const { data: movimentacoes = [] } = useQuery({
     queryKey: ["dre-mov", from, to],
-    queryFn: async () => ((await supabase.from("movimentacoes").select("*")
-      .gte("data", from).lte("data", to)).data ?? []) as any[],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("movimentacoes")
+        .select("*")
+        .gte("data", from)
+        .lte("data", to);
+      if (error) throw error;
+      return (data ?? []) as any[];
+    },
   });
 
   // Receitas
@@ -109,7 +134,7 @@ function DRE({ from, to }: { from: string; to: string }) {
 
   const entradasManuais = useMemo(() =>
     movimentacoes
-      .filter((m: any) => m.tipo === "entrada" && (!m.status || m.status === "pago" || m.status === "recebido"))
+      .filter((m: any) => m.tipo === "entrada" && !m.cobranca_id && (!m.status || m.status === "pago" || m.status === "recebido"))
       .reduce((s, m: any) => s + Number(m.valor), 0), [movimentacoes]);
 
   const totalReceitas = receitaMensalidades + entradasManuais;
@@ -120,7 +145,7 @@ function DRE({ from, to }: { from: string; to: string }) {
 
   const saidasManuais = useMemo(() =>
     movimentacoes
-      .filter((m: any) => m.tipo === "saida")
+      .filter((m: any) => m.tipo === "saida" && !m.conta_pagar_id && (!m.status || m.status === "pago"))
       .reduce((s, m: any) => s + Number(m.valor), 0), [movimentacoes]);
 
   const totalDespesas = despesasContas + saidasManuais;
@@ -128,25 +153,37 @@ function DRE({ from, to }: { from: string; to: string }) {
   const resultadoOperacional = totalReceitas - totalDespesas;
   const margemLiquida = totalReceitas > 0 ? (resultadoOperacional / totalReceitas) * 100 : 0;
 
-  // Receita por categoria
+  // Receita por categoria (Cobranças Pagas + Entradas Avulsas)
   const receitaCategoria = useMemo(() => {
     const map: Record<string, number> = {};
     cobrancasPagas.forEach((c: any) => {
-      const nome = c.categorias?.nome ?? "Sem categoria";
+      const nome = c.categorias?.nome ?? "Cobranças / Mensalidades";
       map[nome] = (map[nome] ?? 0) + Number(c.valor);
     });
+    movimentacoes
+      .filter((m: any) => m.tipo === "entrada" && !m.cobranca_id && (!m.status || m.status === "pago" || m.status === "recebido"))
+      .forEach((m: any) => {
+        const cat = m.categoria || "Entradas Avulsas";
+        map[cat] = (map[cat] ?? 0) + Number(m.valor);
+      });
     return Object.entries(map).sort(([, a], [, b]) => b - a);
-  }, [cobrancasPagas]);
+  }, [cobrancasPagas, movimentacoes]);
 
-  // Despesa por categoria
+  // Despesa por categoria (Contas a Pagar + Saídas Avulsas)
   const despesaCategoria = useMemo(() => {
     const map: Record<string, number> = {};
     contasPagas.forEach((c: any) => {
-      const cat = c.categoria ?? "Sem categoria";
+      const cat = c.categoria ?? "Contas Fixas / Fornecedores";
       map[cat] = (map[cat] ?? 0) + Number(c.valor);
     });
+    movimentacoes
+      .filter((m: any) => m.tipo === "saida" && !m.conta_pagar_id && (!m.status || m.status === "pago"))
+      .forEach((m: any) => {
+        const cat = m.categoria || "Saídas Avulsas";
+        map[cat] = (map[cat] ?? 0) + Number(m.valor);
+      });
     return Object.entries(map).sort(([, a], [, b]) => b - a);
-  }, [contasPagas]);
+  }, [contasPagas, movimentacoes]);
 
   // Gráfico mensal da DRE
   const graficoMensal = useMemo(() => {
@@ -160,12 +197,12 @@ function DRE({ from, to }: { from: string; to: string }) {
       const label = cur.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" });
 
       const receitas =
-        cobrancasPagas.filter((c: any) => (c.data_pagamento ?? "").startsWith(key)).reduce((s, c: any) => s + Number(c.valor), 0) +
-        movimentacoes.filter((m: any) => m.tipo === "entrada" && (!m.status || m.status === "pago") && (m.data ?? "").startsWith(key)).reduce((s, m: any) => s + Number(m.valor), 0);
+        cobrancasPagas.filter((c: any) => (c.data_pagamento ?? c.vencimento ?? "").startsWith(key)).reduce((s, c: any) => s + Number(c.valor), 0) +
+        movimentacoes.filter((m: any) => m.tipo === "entrada" && !m.cobranca_id && (!m.status || m.status === "pago" || m.status === "recebido") && (m.data ?? "").startsWith(key)).reduce((s, m: any) => s + Number(m.valor), 0);
 
       const despesas =
-        contasPagas.filter((c: any) => (c.pago_em ?? "").startsWith(key)).reduce((s, c: any) => s + Number(c.valor), 0) +
-        movimentacoes.filter((m: any) => m.tipo === "saida" && (m.data ?? "").startsWith(key)).reduce((s, m: any) => s + Number(m.valor), 0);
+        contasPagas.filter((c: any) => (c.pago_em ?? c.vencimento ?? "").startsWith(key)).reduce((s, c: any) => s + Number(c.valor), 0) +
+        movimentacoes.filter((m: any) => m.tipo === "saida" && !m.conta_pagar_id && (!m.status || m.status === "pago") && (m.data ?? "").startsWith(key)).reduce((s, m: any) => s + Number(m.valor), 0);
 
       meses.push({ key, label, receitas, despesas, resultado: receitas - despesas });
       cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
@@ -512,20 +549,46 @@ function Movimentacoes({ from, to }: { from: string; to: string }) {
 
   const { data: movData = [] } = useQuery({
     queryKey: ["rel-mov", from, to],
-    queryFn: async () => ((await supabase.from("movimentacoes").select("*, clientes(nome)")
-      .gte("data", from).lte("data", to).order("data", { ascending: false })).data ?? []) as any[],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("movimentacoes")
+        .select("*, clientes(nome)")
+        .gte("data", from)
+        .lte("data", to)
+        .order("data", { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as any[];
+    },
   });
 
   const { data: cobData = [] } = useQuery({
     queryKey: ["rel-cob-pagas", from, to],
-    queryFn: async () => ((await supabase.from("cobrancas").select("*, clientes(nome)").eq("status", "pago")
-      .gte("data_pagamento", from).lte("data_pagamento", to)).data ?? []) as any[],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("cobrancas")
+        .select("*, clientes(nome)")
+        .eq("status", "pago");
+      if (error) throw error;
+      return ((data ?? []) as any[]).filter((c) => {
+        const d = c.data_pagamento || c.vencimento || "";
+        return d >= from && d <= to;
+      });
+    },
   });
 
   const { data: contasPagasData = [] } = useQuery({
     queryKey: ["rel-contas-pagas", from, to],
-    queryFn: async () => ((await supabase.from("contas_pagar").select("*").eq("status", "pago")
-      .gte("pago_em", from).lte("pago_em", to)).data ?? []) as any[],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("contas_pagar")
+        .select("*")
+        .eq("status", "pago");
+      if (error) throw error;
+      return ((data ?? []) as any[]).filter((cp) => {
+        const d = cp.pago_em || cp.vencimento || "";
+        return d >= from && d <= to;
+      });
+    },
   });
 
   const allItems = useMemo(() => {
@@ -535,14 +598,17 @@ function Movimentacoes({ from, to }: { from: string; to: string }) {
       origemRotulo: string; descricao: string; cliente: string; valor: number;
     }[] = [];
 
-    movData.forEach((m: any) => {
-      list.push({
-        id: `mov-${m.id}`, data: m.data, tipo: m.tipo,
-        origem: m.tipo === "entrada" ? "entrada" : "saida",
-        origemRotulo: m.tipo === "entrada" ? "Entrada Manual" : "Saída Manual",
-        descricao: m.descricao, cliente: m.clientes?.nome ?? "—", valor: Number(m.valor),
+    // Inclui apenas movimentações manuais avulsas (evita duplicar com cobranças/contas a pagar)
+    movData
+      .filter((m: any) => !m.cobranca_id && !m.conta_pagar_id && (!m.status || m.status === "pago" || m.status === "recebido"))
+      .forEach((m: any) => {
+        list.push({
+          id: `mov-${m.id}`, data: m.data, tipo: m.tipo,
+          origem: m.tipo === "entrada" ? "entrada" : "saida",
+          origemRotulo: m.tipo === "entrada" ? "Entrada Manual" : "Saída Manual",
+          descricao: m.descricao, cliente: m.clientes?.nome ?? "—", valor: Number(m.valor),
+        });
       });
-    });
 
     cobData.forEach((c: any) => {
       list.push({

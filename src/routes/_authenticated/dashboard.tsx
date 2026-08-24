@@ -75,22 +75,22 @@ export function Dashboard() {
     ? movimentacoes
     : movimentacoes.filter((m: any) => (m.data ?? "").startsWith(selectedMonth));
 
-  // Entradas e saídas manuais confirmadas/pagas
+  // Entradas e saídas manuais confirmadas/pagas (apenas avulsas sem vínculo com cobrança/conta a pagar)
   const entradasConfirmadasManuais = movsPeriodo
-    .filter((m: any) => m.tipo === "entrada" && (!m.status || m.status === "pago" || m.status === "recebido"))
+    .filter((m: any) => m.tipo === "entrada" && !m.cobranca_id && (!m.status || m.status === "pago" || m.status === "recebido"))
     .reduce((s, m) => s + Number(m.valor), 0);
 
   const saidasConfirmadasManuais = movsPeriodo
-    .filter((m: any) => m.tipo === "saida" && (!m.status || m.status === "pago"))
+    .filter((m: any) => m.tipo === "saida" && !m.conta_pagar_id && (!m.status || m.status === "pago"))
     .reduce((s, m) => s + Number(m.valor), 0);
 
   // Entradas e saídas manuais pendentes
   const pendenteReceberManual = movsPeriodo
-    .filter((m: any) => m.tipo === "entrada" && m.status === "pendente")
+    .filter((m: any) => m.tipo === "entrada" && !m.cobranca_id && m.status === "pendente")
     .reduce((s, m) => s + Number(m.valor), 0);
 
   const pendentePagarManual = movsPeriodo
-    .filter((m: any) => m.tipo === "saida" && m.status === "pendente")
+    .filter((m: any) => m.tipo === "saida" && !m.conta_pagar_id && m.status === "pendente")
     .reduce((s, m) => s + Number(m.valor), 0);
 
   // 1. Recebido no Mês (Cobranças Pagas + Entradas Avulsas Pagas)
