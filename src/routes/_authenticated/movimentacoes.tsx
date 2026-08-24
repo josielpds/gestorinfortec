@@ -343,6 +343,28 @@ function MovimentacoesPage() {
                           {m.tipo === "entrada" ? "+" : "-"} {brl(m.valor)}
                         </td>
                         <td className="px-4 py-3 text-right whitespace-nowrap">
+                          {!(m.cobranca_id || m.conta_pagar_id) && m.status === "pendente" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Dar baixa"
+                              onClick={() => toggleStatus.mutate(m)}
+                              disabled={toggleStatus.isPending && toggleStatus.variables?.id === m.id}
+                            >
+                              <Check className="h-4 w-4 text-success" />
+                            </Button>
+                          )}
+                          {!(m.cobranca_id || m.conta_pagar_id) && m.status === "pago" && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              title="Reverter para pendente"
+                              onClick={() => toggleStatus.mutate(m)}
+                              disabled={toggleStatus.isPending && toggleStatus.variables?.id === m.id}
+                            >
+                              <RotateCcw className="h-4 w-4 text-warning-foreground" />
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             variant="ghost"
