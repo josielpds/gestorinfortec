@@ -419,25 +419,9 @@ function CobrancasPage() {
   const totalMes = recebidoMes + aReceberMes + emAtrasoMes;
   const taxaRecebimento = totalMes > 0 ? Math.round((recebidoMes / totalMes) * 100) : 0;
 
-  const previsao = cobrancas
-    .filter((c) => c.status === "pendente" && (!isMonthAll ? c.vencimento.slice(0, 7) > selectedMonth : true))
-    .reduce((s, c) => s + Number(c.valor), 0);
-
-  const proximosMeses = (() => {
-    const out: { key: string; mes: string; total: number }[] = [];
-    const baseYM = isMonthAll ? todayISO().slice(0, 7) : selectedMonth;
-    const [y, m] = baseYM.split("-").map(Number);
-    const base = new Date(y, m - 1, 1);
-    for (let i = 1; i <= 6; i++) {
-      const d = new Date(base.getFullYear(), base.getMonth() + i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      const total = cobrancas
-        .filter((c) => c.status === "pendente" && c.vencimento.slice(0, 7) === key)
-        .reduce((s, c) => s + Number(c.valor), 0);
-      out.push({ key, mes: d.toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }), total });
-    }
-    return out;
-  })();
+  // Previsão do mês selecionado: soma de todas as cobranças/mensalidades programadas no mês
+  const totalProgramadoMes = cobrancasDoMes.reduce((s, c) => s + Number(c.valor), 0);
+  const qtdMensalidadesMes = cobrancasDoMes.filter((c) => c.recorrente).length;
 
   return (
     <AppLayout>
@@ -536,19 +520,16 @@ function CobrancasPage() {
 
           <Card>
             <CardContent className="p-4">
-              <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold mb-2">Previsão próximos meses</p>
-              <p className="text-2xl font-bold text-primary">{brl(previsao)}</p>
-              <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
-                {proximosMeses.map((m) => (
-                  <button
-                    key={m.key}
-                    onClick={() => setSelectedMonth(m.key)}
-                    className="hover:underline text-left cursor-pointer"
-                  >
-                    {m.mes}: <span className="font-medium text-foreground">{brl(m.total)}</span>
-                  </button>
-                ))}
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs uppercase tracking-wide text-muted-foreground font-semibold">Previsão do Mês</p>
+                <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <CalendarRange className="h-4 w-4 text-primary" />
+                </div>
               </div>
+              <p className="text-2xl font-bold text-primary">{brl(totalProgramadoMes)}</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {cobrancasDoMes.length} mensalidades/cobranças programadas {qtdMensalidadesMes > 0 ? `(${qtdMensalidadesMes} recorrentes)` : ""}
+              </p>
             </CardContent>
           </Card>
         </div>
