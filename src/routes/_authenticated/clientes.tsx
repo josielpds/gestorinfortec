@@ -42,9 +42,9 @@ function ClientesPage() {
   });
 
   const save = useMutation({
-    mutationFn: async (payload: Partial<Cliente>) => {
-      if (editing) {
-        const { error } = await supabase.from("clientes").update(payload).eq("id", editing.id);
+    mutationFn: async ({ payload, id }: { payload: Partial<Cliente>; id?: string }) => {
+      if (id) {
+        const { error } = await supabase.from("clientes").update(payload).eq("id", id);
         if (error) throw error;
       } else {
         const user_id = await currentUserId();
@@ -52,11 +52,12 @@ function ClientesPage() {
         if (error) throw error;
       }
     },
-    onSuccess: () => {
-      toast.success(editing ? "Cliente atualizado" : "Cliente cadastrado");
+    onSuccess: (_, vars) => {
+      toast.success(vars.id ? "Cliente atualizado com sucesso" : "Cliente cadastrado com sucesso");
       qc.invalidateQueries({ queryKey: ["clientes"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      setOpen(false); setEditing(null);
+      setOpen(false);
+      setEditing(null);
     },
     onError: (e: any) => toast.error(e.message),
   });
@@ -66,7 +67,10 @@ function ClientesPage() {
       const { error } = await supabase.from("clientes").delete().eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success("Cliente removido"); qc.invalidateQueries({ queryKey: ["clientes"] }); },
+    onSuccess: () => {
+      toast.success("Cliente removido");
+      qc.invalidateQueries({ queryKey: ["clientes"] });
+    },
     onError: (e: any) => toast.error(e.message),
   });
 
@@ -111,7 +115,7 @@ function ClientesPage() {
   };
 
   const filtered = clientes.filter((c) =>
-    (c.nome + " " + c.telefone + " " + (c.email ?? "")).toLowerCase().includes(search.toLowerCase())
+    (c.nome + " " + c.telefone + " " + (c.email ?? "") + " " + (c.documento ?? "")).toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -142,8 +146,19 @@ function ClientesPage() {
                 />
               </Dialog>
               <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEditing(null); }}>
-                <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" /> Novo Cliente</Button></DialogTrigger>
-                <ClienteFormDialog editing={editing} onSubmit={(p) => save.mutate(p)} loading={save.isPending} />
+                <DialogTrigger asChild>
+                  <Button onClick={() => setEditing(null)}>
+                    <Plus className="h-4 w-4 mr-2" /> Novo Cliente
+                  </Button>
+                </DialogTrigger>
+                {open && (
+                  <ClienteFormDialog
+                    key={editing ? editing.id : "novo-cliente"}
+                    editing={editing}
+                    onSubmit={(p) => save.mutate({ payload: p, id: editing?.id })}
+                    loading={save.isPending}
+                  />
+                )}
               </Dialog>
             </div>
           }
@@ -200,7 +215,15 @@ function ClientesPage() {
   );
 }
 
-function ClienteFormDialog({ editing, onSubmit, loading }: { editing: Cliente | null; onSubmit: (p: any) => void; loading: boolean }) {
+function ClienteFormDialog({
+  editing,
+  onSubmit,
+  loading,
+}: {
+  editing: Cliente | null;
+  onSubmit: (p: Partial<Cliente>) => void;
+  loading: boolean;
+}) {
   const [form, setForm] = useState({
     nome: editing?.nome ?? "",
     telefone: editing?.telefone ?? "",
@@ -209,21 +232,62 @@ function ClienteFormDialog({ editing, onSubmit, loading }: { editing: Cliente | 
     observacoes: editing?.observacoes ?? "",
     ativo: editing?.ativo ?? true,
   });
+
   return (
     <DialogContent>
-      <DialogHeader><DialogTitle>{editing ? "Editar" : "Novo"} Cliente</DialogTitle></DialogHeader>
+      <DialogHeader>
+        <DialogTitle>{editing ? "Editar Cliente" : "Novo Cliente"}</DialogTitle>
+      </DialogHeader>
       <div className="grid gap-4 py-2">
-        <div><Label>Nome *</Label><Input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} /></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><Label>Telefone (WhatsApp) *</Label><Input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(11) 98888-8888" /></div>
-          <div><Label>Documento (CPF/CNPJ)</Label><Input value={form.documento ?? ""} onChange={(e) => setForm({ ...form, documento: e.target.value })} /></div>
+        <div>
+          <Label>Nome *</Label>
+          <Input value={form.nome} onChange={(e) => setForm({ ...form, nome: e.target.value })} placeholder="Nome do cliente" />
         </div>
-        <div><Label>Email</Label><Input type="email" value={form.email ?? ""} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
-        <div><Label>Observações</Label><Textarea value={form.observacoes ?? ""} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} rows={3} /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Telefone (WhatsApp) *</Label>
+            <Input value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} placeholder="(11) 98888-8888" />
+          </div>
+          <div>
+            <Label>Documento (CPF/CNPJ)</Label>
+            <Input value={form.documento ?? ""} onChange={(e) => setForm({ ...form, documento: e.target.value })} placeholder="000.000.000-00" />
+          </div>
+        </div>
+        <div>
+          <Label>Email</Label>
+          <Input type="email" value={form.email ?? ""} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="email@exemplo.com" />
+        </div>
+        <div>
+          <Label>Status</Label>
+          <div className="flex items-center gap-3 mt-1.5">
+            <button
+              type="button"
+              onClick={() => setForm({ ...form, ativo: true })}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                form.ativo ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-border"
+              }`}
+            >
+              Ativo
+            </button>
+            <button
+              type="button"
+              onClick={() => setForm({ ...form, ativo: false })}
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+                !form.ativo ? "bg-secondary text-secondary-foreground border-secondary font-bold" : "bg-muted text-muted-foreground border-border"
+              }`}
+            >
+              Inativo
+            </button>
+          </div>
+        </div>
+        <div>
+          <Label>Observações</Label>
+          <Textarea value={form.observacoes ?? ""} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} rows={3} placeholder="Observações adicionais..." />
+        </div>
       </div>
       <DialogFooter>
-        <Button disabled={loading || !form.nome || !form.telefone} onClick={() => onSubmit(form)}>
-          {loading ? "Salvando..." : "Salvar"}
+        <Button disabled={loading || !form.nome.trim() || !form.telefone.trim()} onClick={() => onSubmit(form)}>
+          {loading ? "Salvando..." : editing ? "Salvar Alterações" : "Cadastrar Cliente"}
         </Button>
       </DialogFooter>
     </DialogContent>
