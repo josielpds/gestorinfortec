@@ -42,6 +42,7 @@ function CobrancasPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Cobranca | null>(null);
   const [gerando, setGerando] = useState<Cobranca | null>(null);
+  const [previsaoOpen, setPrevisaoOpen] = useState(false);
   const [filter, setFilter] = useState<string>("aberto");
   const [selectedMonth, setSelectedMonth] = useState<string>(() => todayISO().slice(0, 7));
   const [expandido, setExpandido] = useState<string | null>(null);
@@ -76,10 +77,107 @@ function CobrancasPage() {
   const create = useMutation({
     mutationFn: async (p: any) => {
       const user_id = await currentUserId();
-      const { error } = await supabase.from("cobrancas").insert({ ...p, user_id });
-      if (error) throw error;
+      if (p.recorrente && p.gerar_antecipadas) {
+        const qtd = Math.max(1, Math.min(120, parseInt(p.recorrencia_qtd || "12", 10) || 12));
+        const freq = p.frequencia || "mensal";
+        const datasFuturas = gerarDatas(p.vencimento, freq, qtd - 1, p.recorrencia_fim || null);
+        const todasDatas = [p.vencimento, ...datasFuturas];
+
+        const rows = todasDatas.map((v, i) => ({
+          user_id,
+          cliente_id: p.cliente_id,
+          descricao: p.descricao,
+          valor: p.valor,
+          vencimento: v,
+          categoria_id: p.categoria_id || null,
+          observacoes: p.observacoes || null,
+          status: "pendente",
+          recorrente: i === 0, // marca a primeira como matriz recorrente
+          frequencia: i === 0 ? freq : null,
+          recorrencia_fim: i === 0 ? p.recorrencia_fim || null : null,
+        }));
+
+        const { error } = await supabase.from("cobrancas").insert(rows as any);
+        if (error) throw error;
+        return rows.length;
+      } else {
+        const { error } = await supabase.from("cobrancas").insert({ ...p, user_id });
+        if (error) throw error;
+        return 1;
+      }
     },
-    onSuccess: () => { toast.success("Cobrança criada"); qc.invalidateQueries(); setOpen(false); },
+    onSuccess: (qtd) => {
+      toast.success(qtd > 1 ? `${qtd} cobranças geradas com sucesso (incluindo meses futuros)` : "Cobrança criada com sucesso");
+      qc.invalidateQueries();
+      setOpen(false);
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
+  // Mutação para gerar cobranças futuras em lote para todas as mensalidades ativas
+  const gerarPrevisaoEmMassa = useMutation({
+    mutationFn: async ({ mesesQtd }: { mesesQtd: number }) => {
+      const user_id = await currentUserId();
+      // 1. Busca todas as cobranças recorrentes ativas
+      const { data: recorrentes = [], error: errRec } = await supabase
+        .from("cobrancas")
+        .select("*")
+        .eq("recorrente", true);
+      if (errRec) throw errRec;
+
+      if (recorrentes.length === 0) {
+        throw new Error("Nenhuma cobrança com mensalidade/recorrência ativa encontrada.");
+      }
+
+      // 2. Busca todas as cobranças existentes para não duplicar
+      const { data: todas = [], error: errAll } = await supabase
+        .from("cobrancas")
+        .select("cliente_id, vencimento, descricao");
+      if (errAll) throw errAll;
+
+      const chavesExistentes = new Set(
+        todas.map((c) => `${c.cliente_id}_${c.vencimento}_${(c.descricao || "").trim().toLowerCase()}`)
+      );
+
+      const rowsParaInserir: any[] = [];
+
+      for (const rec of recorrentes) {
+        const freq = rec.frequencia || "mensal";
+        const datas = gerarDatas(rec.vencimento, freq, mesesQtd, rec.recorrencia_fim || null);
+
+        for (const d of datas) {
+          const chave = `${rec.cliente_id}_${d}_${(rec.descricao || "").trim().toLowerCase()}`;
+          if (!chavesExistentes.has(chave)) {
+            chavesExistentes.add(chave);
+            rowsParaInserir.push({
+              user_id,
+              cliente_id: rec.cliente_id,
+              descricao: rec.descricao,
+              valor: rec.valor,
+              vencimento: d,
+              categoria_id: rec.categoria_id || null,
+              observacoes: rec.observacoes || null,
+              status: "pendente",
+              origem_id: rec.id,
+              recorrente: false,
+            });
+          }
+        }
+      }
+
+      if (rowsParaInserir.length === 0) {
+        return { inseridas: 0, mensagem: "Todas as cobranças dos próximos meses já estão geradas." };
+      }
+
+      const { error: errIns } = await supabase.from("cobrancas").insert(rowsParaInserir);
+      if (errIns) throw errIns;
+
+      return { inseridas: rowsParaInserir.length, mensagem: `${rowsParaInserir.length} cobranças futuras geradas!` };
+    },
+    onSuccess: (res) => {
+      toast.success(res.mensagem);
+      qc.invalidateQueries();
+    },
     onError: (e: any) => toast.error(e.message),
   });
 
@@ -126,17 +224,38 @@ function CobrancasPage() {
       if (frequencia && !FREQ_LABEL[frequencia]) { reasons.push(`Linha ${num}: frequência desconhecida ("${(r[6] ?? "").trim()}"). Use semanal, quinzenal, mensal, bimestral, trimestral, semestral ou anual.`); continue; }
       const recorrente = !!frequencia;
       const fim = recorrente && qtd > 0 ? quantidadeParaFim(vencimento, frequencia, qtd) : null;
-      valid.push({
-        cliente_id,
-        descricao,
-        valor,
-        vencimento,
-        categoria_id: catById.get(norm(categoriaNome)) ?? null,
-        observacoes: observacoes || null,
-        recorrente,
-        frequencia: frequencia || null,
-        recorrencia_fim: fim,
-      });
+
+      if (recorrente && qtd > 1) {
+        const datas = gerarDatas(vencimento, frequencia, qtd - 1, fim);
+        const todas = [vencimento, ...datas];
+        todas.forEach((d, idx) => {
+          valid.push({
+            cliente_id,
+            descricao,
+            valor,
+            vencimento: d,
+            categoria_id: catById.get(norm(categoriaNome)) ?? null,
+            observacoes: observacoes || null,
+            recorrente: idx === 0,
+            frequencia: idx === 0 ? frequencia : null,
+            recorrencia_fim: idx === 0 ? fim : null,
+            status: "pendente",
+          });
+        });
+      } else {
+        valid.push({
+          cliente_id,
+          descricao,
+          valor,
+          vencimento,
+          categoria_id: catById.get(norm(categoriaNome)) ?? null,
+          observacoes: observacoes || null,
+          recorrente,
+          frequencia: frequencia || null,
+          recorrencia_fim: fim,
+          status: "pendente",
+        });
+      }
     }
     return { valid, skipped: reasons.length, reasons };
   };
@@ -431,7 +550,24 @@ function CobrancasPage() {
             title="Contas a Receber"
             subtitle={`Gerencie as cobranças e mensalidades dos seus clientes — ${formatMonthLabel(selectedMonth)}`}
             action={
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Dialog open={previsaoOpen} onOpenChange={setPrevisaoOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" disabled={clientes.length === 0} className="border-primary/40 hover:bg-primary/5">
+                      <CalendarRange className="h-4 w-4 mr-2 text-primary" /> Gerar Previsão Futura
+                    </Button>
+                  </DialogTrigger>
+                  {previsaoOpen && (
+                    <GerarPrevisaoDialog
+                      recorrentesCount={cobrancas.filter((c) => c.recorrente).length}
+                      loading={gerarPrevisaoEmMassa.isPending}
+                      onSubmit={(meses) => {
+                        gerarPrevisaoEmMassa.mutate({ mesesQtd: meses });
+                        setPrevisaoOpen(false);
+                      }}
+                    />
+                  )}
+                </Dialog>
                 <Dialog open={importOpen} onOpenChange={setImportOpen}>
                   <DialogTrigger asChild><Button variant="outline" disabled={clientes.length === 0}><Upload className="h-4 w-4 mr-2" /> Importar em massa</Button></DialogTrigger>
                   <BulkImportDialog
@@ -733,7 +869,19 @@ function GerarParcelasForm({ cobranca, onSubmit, loading }: { cobranca: Cobranca
   );
 }
 
-function CobrancaForm({ clientes, categorias, onSubmit, loading, initial }: { clientes: any[]; categorias: any[]; onSubmit: (p: any) => void; loading: boolean; initial?: Cobranca }) {
+function CobrancaForm({
+  clientes,
+  categorias,
+  onSubmit,
+  loading,
+  initial,
+}: {
+  clientes: any[];
+  categorias: any[];
+  onSubmit: (p: any) => void;
+  loading: boolean;
+  initial?: Cobranca;
+}) {
   const [form, setForm] = useState({
     cliente_id: initial?.cliente_id ?? "",
     descricao: initial?.descricao ?? "",
@@ -746,28 +894,47 @@ function CobrancaForm({ clientes, categorias, onSubmit, loading, initial }: { cl
     recorrencia_fim: initial?.recorrencia_fim ?? "",
     recorrencia_qtd: initial?.recorrencia_fim
       ? String(fimParaQuantidade(initial.vencimento, initial.frequencia ?? "mensal", initial.recorrencia_fim))
-      : "",
+      : "12",
+    gerar_antecipadas: true,
   });
+
   return (
-    <DialogContent>
-      <DialogHeader><DialogTitle>{initial ? "Editar cobrança" : "Nova Cobrança"}</DialogTitle></DialogHeader>
+    <DialogContent className="sm:max-w-[500px]">
+      <DialogHeader>
+        <DialogTitle>{initial ? "Editar cobrança" : "Nova Cobrança"}</DialogTitle>
+      </DialogHeader>
       <div className="grid gap-4 py-2">
         <div>
           <Label>Cliente *</Label>
           <Select value={form.cliente_id} onValueChange={(v) => setForm({ ...form, cliente_id: v })}>
-            <SelectTrigger><SelectValue placeholder="Selecione um cliente" /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione um cliente" />
+            </SelectTrigger>
             <SelectContent>
-              {clientes.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+              {clientes.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.nome}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
-        <div><Label>Descrição *</Label><Input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} /></div>
+        <div>
+          <Label>Descrição *</Label>
+          <Input value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Ex.: Mensalidade de Sistema, Suporte..." />
+        </div>
         <div>
           <Label>Categoria de faturamento</Label>
           <Select value={form.categoria_id} onValueChange={(v) => setForm({ ...form, categoria_id: v })}>
-            <SelectTrigger><SelectValue placeholder="Selecione a fonte de renda" /></SelectTrigger>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecione a fonte de renda" />
+            </SelectTrigger>
             <SelectContent>
-              {categorias.map((c) => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}
+              {categorias.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.nome}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
           {categorias.length === 0 && (
@@ -775,49 +942,95 @@ function CobrancaForm({ clientes, categorias, onSubmit, loading, initial }: { cl
           )}
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><Label>Valor (R$) *</Label><Input type="number" step="0.01" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} /></div>
-          <div><Label>Vencimento *</Label><Input type="date" value={form.vencimento} onChange={(e) => setForm({ ...form, vencimento: e.target.value })} /></div>
+          <div>
+            <Label>Valor (R$) *</Label>
+            <Input
+              type="number"
+              step="0.01"
+              value={form.valor}
+              onChange={(e) => setForm({ ...form, valor: e.target.value })}
+              placeholder="0,00"
+            />
+          </div>
+          <div>
+            <Label>Vencimento Inicial *</Label>
+            <Input type="date" value={form.vencimento} onChange={(e) => setForm({ ...form, vencimento: e.target.value })} />
+          </div>
         </div>
 
-        <div className="rounded-lg border p-3 space-y-3">
+        <div className="rounded-lg border p-3 space-y-3 bg-muted/20">
           <div className="flex items-center justify-between">
             <div>
-              <Label className="flex items-center gap-2"><Repeat className="h-4 w-4 text-primary" /> Mensalidade / recorrência</Label>
-              <p className="text-xs text-muted-foreground mt-1">Ao marcar como paga, a próxima cobrança é criada automaticamente.</p>
+              <Label className="flex items-center gap-2 font-semibold">
+                <Repeat className="h-4 w-4 text-primary" /> Mensalidade / Cobrança Recorrente
+              </Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Gera as cobranças futuras antecipadamente para previsão e baixa mensal.
+              </p>
             </div>
             <Switch checked={form.recorrente} onCheckedChange={(v) => setForm({ ...form, recorrente: v })} />
           </div>
           {form.recorrente && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Frequência</Label>
-                <Select value={form.frequencia} onValueChange={(v) => setForm({ ...form, frequencia: v })}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(FREQ_LABEL).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+            <div className="space-y-3 pt-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Frequência</Label>
+                  <Select value={form.frequencia} onValueChange={(v) => setForm({ ...form, frequencia: v })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(FREQ_LABEL).map(([v, l]) => (
+                        <SelectItem key={v} value={v}>
+                          {l}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>Quantidade de parcelas</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={120}
+                    placeholder="Ex.: 12 meses"
+                    value={form.recorrencia_qtd}
+                    onChange={(e) => setForm({ ...form, recorrencia_qtd: e.target.value })}
+                  />
+                </div>
               </div>
-              <div>
-                <Label>Quantidade de cobranças</Label>
-                <Input type="number" min={1} max={120}
-                  placeholder="Ex.: 12 (vazia = sem limite)"
-                  value={form.recorrencia_qtd}
-                  onChange={(e) => setForm({ ...form, recorrencia_qtd: e.target.value })} />
-              </div>
+
+              {!initial && (
+                <div className="flex items-start gap-2 bg-primary/5 border border-primary/20 rounded-lg p-2.5 text-xs">
+                  <CalendarRange className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold text-foreground">Previsão futura ativa:</span>
+                    <p className="text-muted-foreground mt-0.5">
+                      As {form.recorrencia_qtd || "12"} cobranças ficarão criadas em cada mês com status <strong>Pendente</strong>, permitindo acompanhar a previsão de faturamento e dar baixa quando o cliente pagar.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        <div><Label>Observações</Label><Textarea value={form.observacoes ?? ""} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} rows={2} /></div>
+        <div>
+          <Label>Observações</Label>
+          <Textarea value={form.observacoes ?? ""} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} rows={2} placeholder="Anotações opcionais..." />
+        </div>
       </div>
       <DialogFooter>
-        <Button disabled={loading || !form.cliente_id || !form.descricao || !form.valor}
+        <Button
+          disabled={loading || !form.cliente_id || !form.descricao || !form.valor}
           onClick={() => {
-            const qtd = parseInt(form.recorrencia_qtd, 10);
-            const fim = form.recorrente && qtd > 0
-              ? quantidadeParaFim(form.vencimento, form.frequencia, qtd)
-              : form.recorrencia_fim || null;
+            const qtd = parseInt(form.recorrencia_qtd || "12", 10);
+            const fim =
+              form.recorrente && qtd > 0
+                ? quantidadeParaFim(form.vencimento, form.frequencia, qtd)
+                : form.recorrencia_fim || null;
+
             onSubmit({
               cliente_id: form.cliente_id,
               descricao: form.descricao,
@@ -828,9 +1041,78 @@ function CobrancaForm({ clientes, categorias, onSubmit, loading, initial }: { cl
               recorrente: form.recorrente,
               frequencia: form.recorrente ? form.frequencia : null,
               recorrencia_fim: fim,
+              recorrencia_qtd: form.recorrencia_qtd,
+              gerar_antecipadas: form.gerar_antecipadas,
             });
-          }}>
-          {loading ? "Salvando..." : initial ? "Salvar alterações" : "Criar cobrança"}
+          }}
+        >
+          {loading ? "Salvando..." : initial ? "Salvar alterações" : "Criar cobrança(s)"}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  );
+}
+
+function GerarPrevisaoDialog({
+  recorrentesCount,
+  onSubmit,
+  loading,
+}: {
+  recorrentesCount: number;
+  onSubmit: (meses: number) => void;
+  loading: boolean;
+}) {
+  const [meses, setMeses] = useState("12");
+  const n = Math.max(1, Math.min(36, parseInt(meses || "12", 10) || 12));
+
+  return (
+    <DialogContent className="sm:max-w-[480px]">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <CalendarRange className="h-5 w-5 text-primary" />
+          Gerar Previsão de Cobranças Futuras
+        </DialogTitle>
+      </DialogHeader>
+
+      <div className="space-y-4 py-3 text-sm">
+        <p className="text-muted-foreground">
+          Gera automaticamente as cobranças futuras para todas as <strong>mensalidades recorrentes</strong> cadastradas no sistema.
+        </p>
+
+        <div className="bg-muted/40 rounded-lg p-3 border space-y-1.5 text-xs">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Mensalidades ativas:</span>
+            <span className="font-bold text-foreground">{recorrentesCount} mensalidade(s)</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Período de adiantamento:</span>
+            <span className="font-bold text-primary">Próximos {n} meses</span>
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Quantos meses à frente deseja gerar?</Label>
+          <Select value={meses} onValueChange={setMeses}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="3">Próximos 3 meses</SelectItem>
+              <SelectItem value="6">Próximos 6 meses</SelectItem>
+              <SelectItem value="12">Próximos 12 meses (Recomendado)</SelectItem>
+              <SelectItem value="24">Próximos 24 meses</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="text-xs text-muted-foreground bg-primary/5 p-2.5 rounded border border-primary/20">
+          💡 As cobranças criadas ficarão com status <strong>Pendente</strong> em cada mês futuro. Ao selecionar o mês no filtro no topo da tela, você verá a previsão exata de receitas e poderá dar baixa com 1 clique quando o cliente efetuar o pagamento.
+        </div>
+      </div>
+
+      <DialogFooter className="gap-2 sm:gap-0">
+        <Button disabled={loading} onClick={() => onSubmit(n)}>
+          {loading ? "Gerando..." : `Gerar Cobranças dos Próximos ${n} Meses`}
         </Button>
       </DialogFooter>
     </DialogContent>
