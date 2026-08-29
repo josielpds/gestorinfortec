@@ -12,6 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MonthFilter, formatMonthLabel } from "@/components/MonthFilter";
 import { todayISO } from "@/lib/format";
 import {
@@ -28,6 +29,8 @@ import {
   Clock,
   Sparkles,
   RotateCcw,
+  Tag,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -59,6 +62,37 @@ type AtendimentoItem = {
 };
 
 type AtendimentosMap = Record<string, AtendimentoItem>;
+type CategoriasClientesMap = Record<string, string>;
+
+export const ATENDIMENTO_CATEGORIAS = ["EU", "EU-NOC", "IR", "REM"] as const;
+export type AtendimentoCategoria = (typeof ATENDIMENTO_CATEGORIAS)[number];
+
+const CATEGORIA_STYLES: Record<string, { badge: string; pill: string; label: string; dot: string }> = {
+  EU: {
+    badge: "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-400/40 hover:bg-blue-500/25",
+    pill: "bg-blue-600 text-white",
+    label: "EU",
+    dot: "bg-blue-500",
+  },
+  "EU-NOC": {
+    badge: "bg-purple-500/15 text-purple-700 dark:text-purple-400 border-purple-400/40 hover:bg-purple-500/25",
+    pill: "bg-purple-600 text-white",
+    label: "EU-NOC",
+    dot: "bg-purple-500",
+  },
+  IR: {
+    badge: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-400/40 hover:bg-amber-500/25",
+    pill: "bg-amber-600 text-white",
+    label: "IR",
+    dot: "bg-amber-500",
+  },
+  REM: {
+    badge: "bg-teal-500/15 text-teal-700 dark:text-teal-400 border-teal-400/40 hover:bg-teal-500/25",
+    pill: "bg-teal-600 text-white",
+    label: "REM",
+    dot: "bg-teal-500",
+  },
+};
 
 function cleanPhoneForWhatsApp(phone: string): string {
   const digits = phone.replace(/\D/g, "");
@@ -74,10 +108,12 @@ function AtendimentosPage() {
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"todos" | "sim" | "nao">("todos");
+  const [categoryFilter, setCategoryFilter] = useState<string>("todas");
   const [observacaoModal, setObservacaoModal] = useState<{ cliente: Cliente; item?: AtendimentoItem } | null>(null);
   const [obsText, setObsText] = useState("");
 
   const storageKey = `atendimentos_${selectedMonth}`;
+  const catStorageKey = `atendimentos_categorias_clientes`;
 
   // 1. Busca lista de clientes cadastrados
   const { data: clientes = [], isLoading: loadingClientes } = useQuery({
@@ -111,6 +147,78 @@ function AtendimentosPage() {
       } catch {
         return {} as AtendimentosMap;
       }
+    },
+  });
+
+  // 3. Busca a atribuição de categorias exclusivas dos atendimentos (EU, EU-NOC, IR, REM)
+  const { data: clientCategories = {} } = useQuery({
+    queryKey: ["atendimentos_categorias_clientes"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("configuracoes")
+        .select("value")
+        .eq("key", catStorageKey)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data?.value) return {} as CategoriasClientesMap;
+
+      try {
+        const parsed = JSON.parse(data.value);
+        return parsed as CategoriasClientesMap;
+      } catch {
+        return {} as CategoriasClientesMap;
+      }
+    },
+  });
+
+  // Mutação para salvar a categoria de um cliente
+  const setClientCategory = useMutation({
+    mutationFn: async ({ clienteId, categoria }: { clienteId: string; categoria: string | null }) => {
+      const user_id = await currentUserId();
+      const updated: CategoriasClientesMap = { ...clientCategories };
+      if (categoria && categoria !== "none") {
+        updated[clienteId] = categoria;
+      } else {
+        delete updated[clienteId];
+      }
+
+      const { error } = await supabase.from("configuracoes").upsert(
+        {
+          user_id,
+          key: catStorageKey,
+          value: JSON.stringify(updated),
+        },
+        { onConflict: "user_id,key" }
+      );
+      if (error) throw error;
+      return updated;
+    },
+    onMutate: async ({ clienteId, categoria }) => {
+      await qc.cancelQueries({ queryKey: ["atendimentos_categorias_clientes"] });
+      const previous = qc.getQueryData<CategoriasClientesMap>(["atendimentos_categorias_clientes"]);
+      const updated: CategoriasClientesMap = { ...(previous || {}) };
+      if (categoria && categoria !== "none") {
+        updated[clienteId] = categoria;
+      } else {
+        delete updated[clienteId];
+      }
+      qc.setQueryData(["atendimentos_categorias_clientes"], updated);
+      return { previous };
+    },
+    onError: (err: any, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(["atendimentos_categorias_clientes"], context.previous);
+      }
+      toast.error(`Erro ao salvar categoria: ${err.message}`);
+    },
+    onSuccess: (_, vars) => {
+      toast.success(
+        vars.categoria && vars.categoria !== "none"
+          ? `Categoria "${vars.categoria}" atribuída`
+          : "Categoria removida"
+      );
+      qc.invalidateQueries({ queryKey: ["atendimentos_categorias_clientes"] });
     },
   });
 
@@ -197,7 +305,11 @@ function AtendimentosPage() {
   // Marcar todos os clientes filtrados como Sim
   const handleMarcarTodos = () => {
     if (filteredClientes.length === 0) return;
-    if (!confirm(`Deseja marcar todos os ${filteredClientes.length} clientes listados como atendidos no mês de ${formatMonthLabel(selectedMonth)}?`)) {
+    if (
+      !confirm(
+        `Deseja marcar todos os ${filteredClientes.length} clientes listados como atendidos no mês de ${formatMonthLabel(selectedMonth)}?`
+      )
+    ) {
       return;
     }
 
@@ -224,9 +336,44 @@ function AtendimentosPage() {
     toast.info(`Atendimentos de ${formatMonthLabel(selectedMonth)} foram resetados.`);
   };
 
-  // Filtros aplicados
+  // Contagem por categoria
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      todas: clientes.length,
+      EU: 0,
+      "EU-NOC": 0,
+      IR: 0,
+      REM: 0,
+      sem_categoria: 0,
+    };
+
+    clientes.forEach((c) => {
+      const cat = clientCategories[c.id];
+      if (cat && counts[cat] !== undefined) {
+        counts[cat]++;
+      } else {
+        counts.sem_categoria++;
+      }
+    });
+
+    return counts;
+  }, [clientes, clientCategories]);
+
+  // Filtros aplicados (Busca + Status Atendimento + Categoria)
   const filteredClientes = useMemo(() => {
     return clientes.filter((c) => {
+      const clientCat = clientCategories[c.id] || "";
+
+      // Filtro de Categoria
+      if (categoryFilter !== "todas") {
+        if (categoryFilter === "sem_categoria") {
+          if (clientCat) return false;
+        } else if (clientCat !== categoryFilter) {
+          return false;
+        }
+      }
+
+      // Filtro de Busca
       const matchSearch = (
         c.nome +
         " " +
@@ -236,21 +383,24 @@ function AtendimentosPage() {
         " " +
         (c.documento ?? "") +
         " " +
-        (c.observacoes ?? "")
+        (c.observacoes ?? "") +
+        " " +
+        clientCat
       )
         .toLowerCase()
         .includes(search.toLowerCase());
 
       if (!matchSearch) return false;
 
+      // Filtro de Status de Atendimento no Mês
       const isAtendido = !!atendimentosData[c.id]?.atendido;
       if (statusFilter === "sim") return isAtendido;
       if (statusFilter === "nao") return !isAtendido;
       return true;
     });
-  }, [clientes, search, statusFilter, atendimentosData]);
+  }, [clientes, search, statusFilter, categoryFilter, atendimentosData, clientCategories]);
 
-  // Estatísticas do mês
+  // Estatísticas do mês considerando filtros
   const stats = useMemo(() => {
     const total = clientes.length;
     const atendidosCount = clientes.filter((c) => atendimentosData[c.id]?.atendido).length;
@@ -262,15 +412,26 @@ function AtendimentosPage() {
 
   // Exportar relatório de atendimentos em CSV
   const exportCSV = () => {
-    const headers = ["Nome", "Telefone", "Email", "Documento", "Atendido no Mês", "Data/Hora Atendimento", "Observações"];
+    const headers = [
+      "Nome",
+      "Categoria Atendimento",
+      "Telefone",
+      "Email",
+      "Documento",
+      "Atendido no Mês",
+      "Data/Hora Atendimento",
+      "Observações",
+    ];
     const rows = filteredClientes.map((c) => {
       const at = atendimentosData[c.id];
+      const cat = clientCategories[c.id] || "Sem Categoria";
       const atendidoTxt = at?.atendido ? "SIM" : "NÃO";
       const dataTxt = at?.atendido_em ? new Date(at.atendido_em).toLocaleString("pt-BR") : "";
       const obsTxt = (at?.observacao || "").replace(/"/g, '""');
 
       return [
         `"${c.nome.replace(/"/g, '""')}"`,
+        `"${cat}"`,
         `"${c.telefone}"`,
         `"${c.email ?? ""}"`,
         `"${c.documento ?? ""}"`,
@@ -294,7 +455,7 @@ function AtendimentosPage() {
       <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
         <PageHeader
           title="Atendimentos"
-          subtitle="Controle e confirme os atendimentos mensais de cada cliente"
+          subtitle="Controle e confirme os atendimentos mensais de cada cliente por categoria"
           action={
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="outline" size="sm" onClick={exportCSV} disabled={clientes.length === 0}>
@@ -392,7 +553,69 @@ function AtendimentosPage() {
           </Card>
         </div>
 
-        {/* Filtros rápidos e busca */}
+        {/* Barra de Filtro de Categorias */}
+        <Card className="mb-4 bg-muted/20 border">
+          <CardContent className="p-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Tag className="h-4 w-4 text-primary shrink-0" />
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Filtrar por Categoria:
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter("todas")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
+                    categoryFilter === "todas"
+                      ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                      : "bg-background text-muted-foreground hover:text-foreground border-border hover:bg-muted/50"
+                  }`}
+                >
+                  Todas ({categoryCounts.todas})
+                </button>
+
+                {ATENDIMENTO_CATEGORIAS.map((cat) => {
+                  const style = CATEGORIA_STYLES[cat];
+                  const active = categoryFilter === cat;
+                  const count = categoryCounts[cat] || 0;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setCategoryFilter(cat)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                        active
+                          ? `${style.pill} border-transparent shadow-xs`
+                          : `${style.badge} bg-background/80`
+                      }`}
+                    >
+                      <span className={`h-2 w-2 rounded-full ${active ? "bg-white" : style.dot}`} />
+                      <span>{cat}</span>
+                      <span className="opacity-80 text-[11px]">({count})</span>
+                    </button>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter("sem_categoria")}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer border ${
+                    categoryFilter === "sem_categoria"
+                      ? "bg-foreground text-background border-foreground shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground border-dashed border-border hover:bg-muted/50"
+                  }`}
+                >
+                  Sem categoria ({categoryCounts.sem_categoria})
+                </button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Filtros rápidos de Status e Busca */}
         <Card className="mb-4">
           <CardContent className="p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
             <div className="relative flex-1 max-w-md">
@@ -484,6 +707,9 @@ function AtendimentosPage() {
               </CardTitle>
               <CardDescription className="text-xs">
                 Mês de {formatMonthLabel(selectedMonth)} • {filteredClientes.length} cliente(s) listado(s)
+                {categoryFilter !== "todas" && (
+                  <span className="font-semibold text-primary"> • Categoria: {categoryFilter === "sem_categoria" ? "Sem Categoria" : categoryFilter}</span>
+                )}
               </CardDescription>
             </div>
           </CardHeader>
@@ -504,8 +730,10 @@ function AtendimentosPage() {
                 ) : (
                   <div>
                     <Search className="h-10 w-10 mx-auto text-muted-foreground/50 mb-2" />
-                    <p className="font-medium">Nenhum cliente encontrado com os filtros atuais</p>
-                    <p className="text-xs mt-1">Tente ajustar o termo de busca ou o filtro de status.</p>
+                    <p className="font-medium">Nenhum cliente encontrado com os filtros selecionados</p>
+                    <p className="text-xs mt-1">
+                      Tente ajustar o termo de busca, a categoria ({categoryFilter}) ou o filtro de status ({statusFilter}).
+                    </p>
                   </div>
                 )}
               </div>
@@ -516,6 +744,7 @@ function AtendimentosPage() {
                     <tr>
                       <th className="text-center px-4 py-3 w-28">Atendido?</th>
                       <th className="text-left px-4 py-3">Cliente</th>
+                      <th className="text-left px-4 py-3 w-40">Categoria</th>
                       <th className="text-left px-4 py-3">Telefone (WhatsApp)</th>
                       <th className="text-left px-4 py-3">Status no Mês</th>
                       <th className="text-left px-4 py-3">Observações do Mês</th>
@@ -534,6 +763,7 @@ function AtendimentosPage() {
                             minute: "2-digit",
                           })
                         : null;
+                      const clientCat = clientCategories[c.id] || "";
 
                       return (
                         <tr
@@ -575,6 +805,52 @@ function AtendimentosPage() {
                               {c.documento && <span>Doc: {c.documento}</span>}
                               {c.email && <span>• {c.email}</span>}
                             </div>
+                          </td>
+
+                          {/* Seleção de Categoria (EU, EU-NOC, IR, REM) */}
+                          <td className="px-4 py-3.5">
+                            <Select
+                              value={clientCat || "none"}
+                              onValueChange={(val) =>
+                                setClientCategory.mutate({
+                                  clienteId: c.id,
+                                  categoria: val === "none" ? null : val,
+                                })
+                              }
+                            >
+                              <SelectTrigger className="h-8 text-xs font-semibold border bg-background/80 hover:bg-muted/50 w-[125px]">
+                                <SelectValue placeholder="Sem categoria">
+                                  {clientCat ? (
+                                    <span className="flex items-center gap-1.5 font-bold">
+                                      <span
+                                        className={`h-2 w-2 rounded-full ${
+                                          CATEGORIA_STYLES[clientCat]?.dot || "bg-muted-foreground"
+                                        }`}
+                                      />
+                                      <span>{clientCat}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground font-normal">Sem categoria</span>
+                                  )}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none" className="text-xs text-muted-foreground">
+                                  — Sem Categoria
+                                </SelectItem>
+                                {ATENDIMENTO_CATEGORIAS.map((cat) => {
+                                  const style = CATEGORIA_STYLES[cat];
+                                  return (
+                                    <SelectItem key={cat} value={cat} className="text-xs font-medium">
+                                      <span className="flex items-center gap-2">
+                                        <span className={`h-2 w-2 rounded-full ${style.dot}`} />
+                                        <span className="font-bold">{cat}</span>
+                                      </span>
+                                    </SelectItem>
+                                  );
+                                })}
+                              </SelectContent>
+                            </Select>
                           </td>
 
                           {/* Telefone / WhatsApp */}
