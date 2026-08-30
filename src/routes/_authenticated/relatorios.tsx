@@ -9,8 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Download, TrendingUp, TrendingDown, Users, AlertCircle, BarChart3, FileText, Minus } from "lucide-react";
+import {
+  Download, TrendingUp, TrendingDown, Users, AlertCircle, BarChart3, FileText, Minus,
+  UserCheck, Search, ChevronDown, ChevronRight, CheckCircle2, Clock, Phone, ArrowUpDown, MessageSquare
+} from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { brl, fmtDate, effectiveStatus, todayISO, daysBetween } from "@/lib/format";
+import { waLink } from "@/lib/whatsapp";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid,
   PieChart, Pie, Cell, Legend, LineChart, Line, Area, AreaChart,
@@ -19,7 +24,7 @@ import {
 export const Route = createFileRoute("/_authenticated/relatorios")({
   head: () => ({ meta: [
     { title: "Relatórios — CobraZap" },
-    { name: "description", content: "DRE, faturamento, movimentações financeiras, cadastros e inadimplência." },
+    { name: "description", content: "DRE, faturamento, movimentações financeiras, cadastros, clientes com cobranças ativas e inadimplência." },
   ] }),
   component: RelatoriosPage,
 });
@@ -60,6 +65,7 @@ function RelatoriosPage() {
             <TabsTrigger value="dre" className="gap-1.5"><FileText className="h-3.5 w-3.5" />DRE</TabsTrigger>
             <TabsTrigger value="faturamento" className="gap-1.5"><TrendingUp className="h-3.5 w-3.5" />Faturamento</TabsTrigger>
             <TabsTrigger value="movimentacoes" className="gap-1.5"><BarChart3 className="h-3.5 w-3.5" />Movimentações</TabsTrigger>
+            <TabsTrigger value="cobrancas-ativas" className="gap-1.5"><UserCheck className="h-3.5 w-3.5" />Cobranças Ativas por Cliente</TabsTrigger>
             <TabsTrigger value="cadastros" className="gap-1.5"><Users className="h-3.5 w-3.5" />Cadastros</TabsTrigger>
             <TabsTrigger value="inadimplencia" className="gap-1.5"><AlertCircle className="h-3.5 w-3.5" />Inadimplência</TabsTrigger>
           </TabsList>
@@ -67,6 +73,7 @@ function RelatoriosPage() {
           <TabsContent value="dre"><DRE from={from} to={to} /></TabsContent>
           <TabsContent value="faturamento"><Faturamento from={from} to={to} /></TabsContent>
           <TabsContent value="movimentacoes"><Movimentacoes from={from} to={to} /></TabsContent>
+          <TabsContent value="cobrancas-ativas"><ClientesCobrancasAtivas /></TabsContent>
           <TabsContent value="cadastros"><Cadastros from={from} to={to} /></TabsContent>
           <TabsContent value="inadimplencia"><Inadimplencia /></TabsContent>
         </Tabs>
@@ -741,6 +748,771 @@ function Movimentacoes({ from, to }: { from: string; to: string }) {
             </tbody>
           </table>
         </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ─── COBRANÇAS ATIVAS POR CLIENTE ───────────────────────────────────────────
+function ClientesCobrancasAtivas() {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"todos" | "com_ativas" | "em_dia" | "com_atraso" | "sem_ativas">("com_ativas");
+  const [clienteAtivoFilter, setClienteAtivoFilter] = useState<"todos" | "ativos" | "inativos">("todos");
+  const [sortOrder, setSortOrder] = useState<"maior_valor" | "menor_valor" | "mais_cobrancas" | "nome_asc" | "proximo_vencimento">("maior_valor");
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const { data: clientes = [], isLoading: loadingClientes } = useQuery({
+    queryKey: ["rel-clientes-cobrancas-ativas-clientes"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("clientes")
+        .select("id, nome, telefone, email, documento, ativo, created_at")
+        .order("nome");
+      if (error) throw error;
+      return (data ?? []) as any[];
+    },
+  });
+
+  const { data: cobrancas = [], isLoading: loadingCobrancas } = useQuery({
+    queryKey: ["rel-clientes-cobrancas-ativas-cobrancas"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("cobrancas")
+        .select("id, cliente_id, descricao, valor, vencimento, status, data_pagamento, recorrente, frequencia, categorias(nome)")
+        .order("vencimento");
+      if (error) throw error;
+      return (data ?? []) as any[];
+    },
+  });
+
+  const today = todayISO();
+
+  // Consolidação dos dados por cliente
+  const clientesConsolidados = useMemo(() => {
+    // Agrupa cobranças por cliente_id
+    const cobPorCliente: Record<string, any[]> = {};
+    cobrancas.forEach((c) => {
+      if (!c.cliente_id) return;
+      if (!cobPorCliente[c.cliente_id]) cobPorCliente[c.cliente_id] = [];
+      cobPorCliente[c.cliente_id].push(c);
+    });
+
+    return clientes.map((cli) => {
+      const cList = cobPorCliente[cli.id] ?? [];
+      const ativas = cList.filter((c) => c.status === "pendente");
+      const emDia = ativas.filter((c) => effectiveStatus(c.vencimento, c.status) !== "atrasado");
+      const atrasadas = ativas.filter((c) => effectiveStatus(c.vencimento, c.status) === "atrasado");
+      const pagas = cList.filter((c) => c.status === "pago");
+      const recorrentes = cList.filter((c) => c.recorrente);
+
+      const valorAtivo = ativas.reduce((s, c) => s + Number(c.valor), 0);
+      const valorEmDia = emDia.reduce((s, c) => s + Number(c.valor), 0);
+      const valorAtrasado = atrasadas.reduce((s, c) => s + Number(c.valor), 0);
+      const valorPago = pagas.reduce((s, c) => s + Number(c.valor), 0);
+
+      // Próximo vencimento (ou vencimento pendente mais urgente)
+      let proximoVencimento: string | null = null;
+      if (ativas.length > 0) {
+        const sortedAtivas = [...ativas].sort((a, b) => a.vencimento.localeCompare(b.vencimento));
+        const futuro = sortedAtivas.find((c) => c.vencimento >= today);
+        proximoVencimento = futuro ? futuro.vencimento : sortedAtivas[0].vencimento;
+      }
+
+      // Maior atraso em dias
+      let maiorAtrasoDias = 0;
+      if (atrasadas.length > 0) {
+        maiorAtrasoDias = Math.max(...atrasadas.map((c) => daysBetween(c.vencimento, today)));
+      }
+
+      let situacao: "em_dia" | "atrasado" | "sem_cobrancas" = "sem_cobrancas";
+      if (ativas.length > 0) {
+        situacao = atrasadas.length > 0 ? "atrasado" : "em_dia";
+      }
+
+      return {
+        ...cli,
+        cobrancasTotal: cList.length,
+        cobrancasAtivas: ativas,
+        totalAtivas: ativas.length,
+        totalEmDia: emDia.length,
+        totalAtrasadas: atrasadas.length,
+        totalPagas: pagas.length,
+        totalRecorrentes: recorrentes.length,
+        valorAtivo,
+        valorEmDia,
+        valorAtrasado,
+        valorPago,
+        proximoVencimento,
+        maiorAtrasoDias,
+        situacao,
+      };
+    });
+  }, [clientes, cobrancas, today]);
+
+  // Estatísticas Gerais (KPIs)
+  const stats = useMemo(() => {
+    const totalClientes = clientesConsolidados.length;
+    const comAtivas = clientesConsolidados.filter((c) => c.totalAtivas > 0);
+    const semAtivas = clientesConsolidados.filter((c) => c.totalAtivas === 0);
+    const emDia = clientesConsolidados.filter((c) => c.situacao === "em_dia");
+    const comAtraso = clientesConsolidados.filter((c) => c.situacao === "atrasado");
+
+    const totalValorAtivo = comAtivas.reduce((s, c) => s + c.valorAtivo, 0);
+    const totalValorEmDia = comAtivas.reduce((s, c) => s + c.valorEmDia, 0);
+    const totalValorAtrasado = comAtivas.reduce((s, c) => s + c.valorAtrasado, 0);
+    const totalQtdAtivas = comAtivas.reduce((s, c) => s + c.totalAtivas, 0);
+    const totalQtdAtrasadas = comAtivas.reduce((s, c) => s + c.totalAtrasadas, 0);
+    const totalQtdEmDia = comAtivas.reduce((s, c) => s + c.totalEmDia, 0);
+
+    const pctComAtivas = totalClientes > 0 ? Math.round((comAtivas.length / totalClientes) * 100) : 0;
+    const pctSemAtivas = totalClientes > 0 ? Math.round((semAtivas.length / totalClientes) * 100) : 0;
+    const ticketMedio = comAtivas.length > 0 ? totalValorAtivo / comAtivas.length : 0;
+
+    return {
+      totalClientes,
+      totalComAtivas: comAtivas.length,
+      pctComAtivas,
+      totalSemAtivas: semAtivas.length,
+      pctSemAtivas,
+      totalEmDia: emDia.length,
+      totalComAtraso: comAtraso.length,
+      totalValorAtivo,
+      totalValorEmDia,
+      totalValorAtrasado,
+      totalQtdAtivas,
+      totalQtdEmDia,
+      totalQtdAtrasadas,
+      ticketMedio,
+    };
+  }, [clientesConsolidados]);
+
+  // Gráficos
+  const pieData = useMemo(() => [
+    { name: "Cobranças em Dia", value: stats.totalEmDia, color: "hsl(142, 76%, 36%)" },
+    { name: "Com Cobranças em Atraso", value: stats.totalComAtraso, color: "hsl(0, 84%, 60%)" },
+    { name: "Sem Cobranças Ativas", value: stats.totalSemAtivas, color: "hsl(215, 14%, 65%)" },
+  ], [stats]);
+
+  const topClientesAtivos = useMemo(() => {
+    return [...clientesConsolidados]
+      .filter((c) => c.valorAtivo > 0)
+      .sort((a, b) => b.valorAtivo - a.valorAtivo)
+      .slice(0, 8)
+      .map((c) => ({
+        nome: c.nome.length > 18 ? c.nome.slice(0, 16) + "…" : c.nome,
+        valorAtivo: c.valorAtivo,
+        qtd: c.totalAtivas,
+      }));
+  }, [clientesConsolidados]);
+
+  // Filtragem e Ordenação da Tabela
+  const clientesFiltrados = useMemo(() => {
+    return clientesConsolidados
+      .filter((c) => {
+        // Filtro por texto
+        if (search.trim()) {
+          const s = search.toLowerCase();
+          const match =
+            c.nome.toLowerCase().includes(s) ||
+            (c.telefone || "").includes(s) ||
+            (c.documento || "").toLowerCase().includes(s) ||
+            (c.email || "").toLowerCase().includes(s);
+          if (!match) return false;
+        }
+
+        // Filtro por status de cobrança
+        if (statusFilter === "com_ativas" && c.totalAtivas === 0) return false;
+        if (statusFilter === "em_dia" && c.situacao !== "em_dia") return false;
+        if (statusFilter === "com_atraso" && c.situacao !== "atrasado") return false;
+        if (statusFilter === "sem_ativas" && c.totalAtivas > 0) return false;
+
+        // Filtro por status do cadastro do cliente
+        if (clienteAtivoFilter === "ativos" && !c.ativo) return false;
+        if (clienteAtivoFilter === "inativos" && c.ativo) return false;
+
+        return true;
+      })
+      .sort((a, b) => {
+        if (sortOrder === "maior_valor") return b.valorAtivo - a.valorAtivo;
+        if (sortOrder === "menor_valor") return a.valorAtivo - b.valorAtivo;
+        if (sortOrder === "mais_cobrancas") return b.totalAtivas - a.totalAtivas;
+        if (sortOrder === "nome_asc") return a.nome.localeCompare(b.nome);
+        if (sortOrder === "proximo_vencimento") {
+          if (!a.proximoVencimento) return 1;
+          if (!b.proximoVencimento) return -1;
+          return a.proximoVencimento.localeCompare(b.proximoVencimento);
+        }
+        return 0;
+      });
+  }, [clientesConsolidados, search, statusFilter, clienteAtivoFilter, sortOrder]);
+
+  // Exportação CSV
+  const handleExportCSV = () => {
+    const rows = clientesConsolidados.map((c) => ({
+      nome: c.nome,
+      telefone: c.telefone || "",
+      email: c.email || "",
+      documento: c.documento || "",
+      status_cliente: c.ativo ? "Ativo" : "Inativo",
+      tem_cobrancas_ativas: c.totalAtivas > 0 ? "Sim" : "Não",
+      qtd_cobrancas_ativas: c.totalAtivas,
+      valor_total_ativo: brl(c.valorAtivo),
+      qtd_em_dia: c.totalEmDia,
+      valor_em_dia: brl(c.valorEmDia),
+      qtd_em_atraso: c.totalAtrasadas,
+      valor_em_atraso: brl(c.valorAtrasado),
+      proximo_vencimento: c.proximoVencimento ? fmtDate(c.proximoVencimento) : "—",
+      maior_atraso_dias: c.maiorAtrasoDias > 0 ? `${c.maiorAtrasoDias} dias` : "0",
+      situacao: c.situacao === "em_dia" ? "Em dia" : c.situacao === "atrasado" ? "Em atraso" : "Sem cobranças ativas",
+      total_cobrancas_pagas: c.totalPagas,
+      valor_total_pago: brl(c.valorPago),
+    }));
+
+    exportCSV("relatorio-clientes-cobrancas-ativas.csv", rows, [
+      { key: "nome", label: "Cliente" },
+      { key: "telefone", label: "Telefone" },
+      { key: "email", label: "Email" },
+      { key: "documento", label: "Documento" },
+      { key: "status_cliente", label: "Status Cadastro" },
+      { key: "tem_cobrancas_ativas", label: "Tem Cobrança Ativa?" },
+      { key: "qtd_cobrancas_ativas", label: "Qtd Cobranças Ativas" },
+      { key: "valor_total_ativo", label: "Total em Aberto" },
+      { key: "qtd_em_dia", label: "Qtd em Dia" },
+      { key: "valor_em_dia", label: "Valor em Dia" },
+      { key: "qtd_em_atraso", label: "Qtd em Atraso" },
+      { key: "valor_em_atraso", label: "Valor em Atraso" },
+      { key: "proximo_vencimento", label: "Próximo Vencimento" },
+      { key: "maior_atraso_dias", label: "Maior Atraso" },
+      { key: "situacao", label: "Situação" },
+      { key: "total_cobrancas_pagas", label: "Cobranças Pagas (Histórico)" },
+      { key: "valor_total_pago", label: "Total Pago (Histórico)" },
+    ]);
+  };
+
+  return (
+    <div className="mt-4 space-y-6">
+      {/* Cabeçalho do Relatório */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <UserCheck className="h-5 w-5 text-primary" />
+            Clientes com Cobranças Ativas
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Visão consolidada de quantos e quais clientes cadastrados possuem cobranças e mensalidades em aberto.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={handleExportCSV} className="self-start sm:self-auto">
+          <Download className="h-4 w-4 mr-2" /> Exportar Relatório CSV
+        </Button>
+      </div>
+
+      {/* Cards de Métricas e KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatBox
+          label="Clientes Cadastrados"
+          value={stats.totalClientes.toString()}
+          icon={Users}
+          subtext="Base total de clientes"
+        />
+        <StatBox
+          label="Clientes c/ Cobranças Ativas"
+          value={`${stats.totalComAtivas}`}
+          tone="success"
+          icon={UserCheck}
+          subtext={`${stats.pctComAtivas}% da base (${stats.totalQtdAtivas} cobranças)`}
+        />
+        <StatBox
+          label="Clientes s/ Cobranças Ativas"
+          value={`${stats.totalSemAtivas}`}
+          icon={Minus}
+          subtext={`${stats.pctSemAtivas}% da base sem pendências`}
+        />
+        <StatBox
+          label="Total Ativo a Receber"
+          value={brl(stats.totalValorAtivo)}
+          tone="info"
+          icon={TrendingUp}
+          subtext={`Ticket médio: ${brl(stats.ticketMedio)}/cliente`}
+        />
+      </div>
+
+      {/* Métricas secundárias de pontualidade */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card className="border-l-4 border-l-success">
+          <CardContent className="pt-4 pb-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-muted-foreground uppercase">Clientes Em Dia</div>
+              <div className="text-xl font-bold text-success mt-1">{stats.totalEmDia} clientes</div>
+              <div className="text-xs text-muted-foreground">{brl(stats.totalValorEmDia)} ({stats.totalQtdEmDia} cobranças)</div>
+            </div>
+            <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center text-success">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-destructive">
+          <CardContent className="pt-4 pb-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-muted-foreground uppercase">Clientes em Atraso</div>
+              <div className="text-xl font-bold text-destructive mt-1">{stats.totalComAtraso} clientes</div>
+              <div className="text-xs text-muted-foreground">{brl(stats.totalValorAtrasado)} ({stats.totalQtdAtrasadas} cobranças)</div>
+            </div>
+            <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+              <AlertCircle className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-muted-foreground">
+          <CardContent className="pt-4 pb-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-muted-foreground uppercase">Taxa de Cobertura Ativa</div>
+              <div className="text-xl font-bold mt-1">{stats.pctComAtivas}%</div>
+              <div className="text-xs text-muted-foreground">dos clientes possuem cobranças ativas</div>
+            </div>
+            <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
+              <BarChart3 className="h-5 w-5" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Gráficos */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Gráfico 1: Proporção de Clientes */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Users className="h-4 w-4 text-primary" />
+              Distribuição da Carteira de Clientes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-64">
+            {stats.totalClientes === 0 ? (
+              <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                Nenhum cliente cadastrado
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={50}
+                    outerRadius={85}
+                    paddingAngle={3}
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: any, name: any) => [`${value} clientes (${stats.totalClientes > 0 ? Math.round((Number(value) / stats.totalClientes) * 100) : 0}%)`, name]} />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Gráfico 2: Top Clientes com Maior Volume Ativo */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-primary" />
+              Top Clientes por Volume em Aberto (R$)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="h-64">
+            {topClientesAtivos.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                Nenhum cliente com cobranças em aberto
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={topClientesAtivos} layout="vertical" margin={{ left: 10, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                  <XAxis type="number" tickFormatter={(v) => `R$${v}`} tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="nome" width={110} tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={(v: any) => [brl(v), "Total Ativo"]} />
+                  <Bar dataKey="valorAtivo" fill="hsl(221, 83%, 53%)" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Painel de Filtros e Busca */}
+      <Card>
+        <CardContent className="pt-6 space-y-4">
+          <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+            {/* Campo de Busca */}
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nome, telefone, documento ou email..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+
+            {/* Selects de Filtros */}
+            <div className="flex flex-wrap gap-2 items-center">
+              <div className="w-44">
+                <Select value={sortOrder} onValueChange={(v: any) => setSortOrder(v)}>
+                  <SelectTrigger className="h-9">
+                    <ArrowUpDown className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
+                    <SelectValue placeholder="Ordenar por" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="maior_valor">Maior valor ativo</SelectItem>
+                    <SelectItem value="menor_valor">Menor valor ativo</SelectItem>
+                    <SelectItem value="mais_cobrancas">Mais cobranças</SelectItem>
+                    <SelectItem value="nome_asc">Nome (A - Z)</SelectItem>
+                    <SelectItem value="proximo_vencimento">Próximo vencimento</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="w-36">
+                <Select value={clienteAtivoFilter} onValueChange={(v: any) => setClienteAtivoFilter(v)}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Status cliente" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos cadastros</SelectItem>
+                    <SelectItem value="ativos">Apenas ativos</SelectItem>
+                    <SelectItem value="inativos">Apenas inativos</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          {/* Botões de Filtro Rápido de Cobrança */}
+          <div className="flex flex-wrap gap-2 pt-2 border-t">
+            <Button
+              variant={statusFilter === "todos" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStatusFilter("todos")}
+            >
+              Todos ({clientesConsolidados.length})
+            </Button>
+            <Button
+              variant={statusFilter === "com_ativas" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStatusFilter("com_ativas")}
+              className={statusFilter === "com_ativas" ? "" : "border-primary/40 text-primary"}
+            >
+              Com Cobranças Ativas ({stats.totalComAtivas})
+            </Button>
+            <Button
+              variant={statusFilter === "em_dia" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStatusFilter("em_dia")}
+              className={statusFilter === "em_dia" ? "" : "text-success border-success/40"}
+            >
+              Em Dia ({stats.totalEmDia})
+            </Button>
+            <Button
+              variant={statusFilter === "com_atraso" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStatusFilter("com_atraso")}
+              className={statusFilter === "com_atraso" ? "" : "text-destructive border-destructive/40"}
+            >
+              Com Atraso ({stats.totalComAtraso})
+            </Button>
+            <Button
+              variant={statusFilter === "sem_ativas" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setStatusFilter("sem_ativas")}
+            >
+              Sem Cobranças Ativas ({stats.totalSemAtivas})
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Tabela Detalhada de Clientes */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between py-4">
+          <div>
+            <CardTitle className="text-base font-semibold">
+              Listagem de Clientes ({clientesFiltrados.length})
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Clique em uma linha para expandir e ver as cobranças ativas individuais do cliente.
+            </p>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-muted/50 text-xs uppercase text-muted-foreground tracking-wide">
+                <tr>
+                  <th className="w-8 px-3 py-3"></th>
+                  <th className="text-left px-4 py-3">Cliente</th>
+                  <th className="text-left px-4 py-3">Contato / Doc</th>
+                  <th className="text-center px-4 py-3">Cobranças Ativas</th>
+                  <th className="text-right px-4 py-3">Valor em Aberto</th>
+                  <th className="text-left px-4 py-3">Próximo Venc.</th>
+                  <th className="text-left px-4 py-3">Situação</th>
+                  <th className="text-right px-4 py-3">Histórico Pago</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {clientesFiltrados.map((cli) => {
+                  const isExpanded = expandedIds.has(cli.id);
+                  return (
+                    <Fragment key={cli.id}>
+                      <tr
+                        onClick={() => toggleExpand(cli.id)}
+                        className={`hover:bg-muted/30 cursor-pointer transition-colors ${
+                          isExpanded ? "bg-muted/20" : ""
+                        }`}
+                      >
+                        <td className="px-3 py-3 text-center text-muted-foreground">
+                          {cli.totalAtivas > 0 ? (
+                            isExpanded ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )
+                          ) : (
+                            <span className="inline-block w-4" />
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-sm">{cli.nome}</div>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <Badge
+                              variant="outline"
+                              className={
+                                cli.ativo
+                                  ? "bg-success/10 text-success border-success/30 text-[10px] py-0"
+                                  : "bg-muted text-muted-foreground text-[10px] py-0"
+                              }
+                            >
+                              {cli.ativo ? "Ativo" : "Inativo"}
+                            </Badge>
+                            {cli.totalRecorrentes > 0 && (
+                              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30 text-[10px] py-0">
+                                {cli.totalRecorrentes} recorrência(s)
+                              </Badge>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          <div className="text-muted-foreground">{cli.telefone || "—"}</div>
+                          {cli.documento && (
+                            <div className="text-xs text-muted-foreground font-mono">{cli.documento}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          {cli.totalAtivas > 0 ? (
+                            <div className="inline-flex flex-col items-center">
+                              <Badge variant="secondary" className="font-bold">
+                                {cli.totalAtivas} ativa{cli.totalAtivas > 1 ? "s" : ""}
+                              </Badge>
+                              {(cli.totalAtrasadas > 0 || cli.totalEmDia > 0) && (
+                                <span className="text-[11px] text-muted-foreground mt-0.5">
+                                  {cli.totalEmDia > 0 && <span className="text-success">{cli.totalEmDia} em dia</span>}
+                                  {cli.totalEmDia > 0 && cli.totalAtrasadas > 0 && " • "}
+                                  {cli.totalAtrasadas > 0 && <span className="text-destructive font-semibold">{cli.totalAtrasadas} atrasada(s)</span>}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">0</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className={`font-bold text-sm ${cli.valorAtivo > 0 ? "text-foreground" : "text-muted-foreground"}`}>
+                            {brl(cli.valorAtivo)}
+                          </div>
+                          {cli.valorAtrasado > 0 && (
+                            <div className="text-[11px] text-destructive font-medium">
+                              ({brl(cli.valorAtrasado)} em atraso)
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {cli.proximoVencimento ? (
+                            <div>
+                              <div className="font-medium">{fmtDate(cli.proximoVencimento)}</div>
+                              {cli.maiorAtrasoDias > 0 && (
+                                <div className="text-[11px] text-destructive font-medium">
+                                  Atraso: {cli.maiorAtrasoDias} dias
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {cli.situacao === "em_dia" && (
+                            <Badge variant="outline" className="bg-success/15 text-success border-success/30 gap-1">
+                              <CheckCircle2 className="h-3 w-3" /> Em dia
+                            </Badge>
+                          )}
+                          {cli.situacao === "atrasado" && (
+                            <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/30 gap-1 font-semibold">
+                              <AlertCircle className="h-3 w-3" /> Em atraso
+                            </Badge>
+                          )}
+                          {cli.situacao === "sem_cobrancas" && (
+                            <Badge variant="outline" className="bg-muted text-muted-foreground">
+                              Sem cobrança ativa
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right text-sm">
+                          <div className="text-success font-medium">{brl(cli.valorPago)}</div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {cli.totalPagas} quitada{cli.totalPagas > 1 ? "s" : ""}
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* Linha Expansível com as cobranças ativas do cliente */}
+                      {isExpanded && (
+                        <tr className="bg-muted/15">
+                          <td colSpan={8} className="p-4 pl-12">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                                  <Clock className="h-3.5 w-3.5" />
+                                  Cobranças Ativas de {cli.nome} ({cli.totalAtivas})
+                                </div>
+                                {cli.telefone && (
+                                  <a
+                                    href={waLink(
+                                      cli.telefone,
+                                      `Olá ${cli.nome}, tudo bem? Entramos em contato para verificar suas cobranças em aberto no valor total de ${brl(cli.valorAtivo)}.`
+                                    )}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1.5 text-xs text-success hover:underline font-medium"
+                                  >
+                                    <MessageSquare className="h-3.5 w-3.5" /> Cobrar via WhatsApp
+                                  </a>
+                                )}
+                              </div>
+
+                              {cli.cobrancasAtivas.length === 0 ? (
+                                <p className="text-xs text-muted-foreground italic">
+                                  Nenhuma cobrança ativa no momento.
+                                </p>
+                              ) : (
+                                <div className="rounded-md border bg-background overflow-hidden">
+                                  <table className="w-full text-xs">
+                                    <thead className="bg-muted/40 text-muted-foreground uppercase">
+                                      <tr>
+                                        <th className="text-left px-3 py-2">Descrição</th>
+                                        <th className="text-left px-3 py-2">Categoria</th>
+                                        <th className="text-left px-3 py-2">Vencimento</th>
+                                        <th className="text-right px-3 py-2">Valor</th>
+                                        <th className="text-left px-3 py-2">Status</th>
+                                        <th className="text-center px-3 py-2">Ação</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                      {cli.cobrancasAtivas.map((cob: any) => {
+                                        const st = effectiveStatus(cob.vencimento, cob.status);
+                                        const diasAtraso = st === "atrasado" ? daysBetween(cob.vencimento, today) : 0;
+                                        return (
+                                          <tr key={cob.id} className="hover:bg-muted/20">
+                                            <td className="px-3 py-2 font-medium">
+                                              {cob.descricao}
+                                              {cob.recorrente && (
+                                                <Badge variant="outline" className="ml-1.5 text-[9px] py-0">
+                                                  Recorrente
+                                                </Badge>
+                                              )}
+                                            </td>
+                                            <td className="px-3 py-2 text-muted-foreground">
+                                              {cob.categorias?.nome || "Sem categoria"}
+                                            </td>
+                                            <td className="px-3 py-2 font-medium">
+                                              {fmtDate(cob.vencimento)}
+                                              {st === "atrasado" && (
+                                                <span className="text-destructive font-normal ml-1">
+                                                  ({diasAtraso}d de atraso)
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td className="px-3 py-2 text-right font-bold">
+                                              {brl(cob.valor)}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                              <Badge
+                                                variant="outline"
+                                                className={
+                                                  st === "atrasado"
+                                                    ? "bg-destructive/10 text-destructive border-destructive/30"
+                                                    : "bg-warning/15 text-warning-foreground border-warning/30"
+                                                }
+                                              >
+                                                {st === "atrasado" ? "Atrasado" : "Pendente"}
+                                              </Badge>
+                                            </td>
+                                            <td className="px-3 py-2 text-center">
+                                              {cli.telefone && (
+                                                <a
+                                                  href={waLink(
+                                                    cli.telefone,
+                                                    `Olá ${cli.nome}! Lembramos do vencimento da sua cobrança "${cob.descricao}" no valor de ${brl(cob.valor)} com vencimento em ${fmtDate(cob.vencimento)}.`
+                                                  )}
+                                                  target="_blank"
+                                                  rel="noreferrer"
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  className="inline-flex items-center text-primary hover:underline text-xs"
+                                                >
+                                                  <MessageSquare className="h-3 w-3 mr-1" /> Notificar
+                                                </a>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+
+                {clientesFiltrados.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="text-center py-12 text-muted-foreground text-sm">
+                      Nenhum cliente encontrado com os filtros aplicados.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </CardContent>
       </Card>
     </div>
