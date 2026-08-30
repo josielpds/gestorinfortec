@@ -16,7 +16,7 @@ const nav = [
   { to: "/clientes", label: "Clientes", icon: Users },
   { to: "/cobrancas", label: "Contas a Receber", icon: Receipt },
   { to: "/contas-a-pagar", label: "Contas a Pagar", icon: FileMinus },
-  { to: "/movimentacoes", label: "Lançamentos de Entradas e Saídas", icon: Wallet },
+  { to: "/movimentacoes", label: "Entradas e Saídas", icon: Wallet },
   { to: "/mensagens", label: "Disparar Mensagens", icon: MessageCircle },
   { to: "/relatorios", label: "Relatórios", icon: BarChart3 },
   { to: "/atendimentos", label: "Atendimentos", icon: UserCheck },
