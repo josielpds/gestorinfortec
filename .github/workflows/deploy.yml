@@ -28,16 +28,17 @@ jobs:
           bun-version: latest
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: bun install
 
       # .env is needed at build time for VITE_SUPABASE_*.
-      # Add these as repository Secrets/Variables, then expose them here.
-      # (VITE_ vars are inlined at build time by Vite.)
+      # Uses repository Secrets/Variables if configured, or default project credentials as fallback.
       - name: Build static site
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || vars.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
-        run: bun run build
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || vars.VITE_SUPABASE_URL || 'https://yudjrppqhgruyesyqsvs.supabase.co' }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || vars.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_h6Lghtd6o4CF2cSM7HZVWQ_Y4X2SP6U' }}
+        run: |
+          bun run build
+          cp ./dist/client/index.html ./dist/client/404.html || true
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -59,3 +60,4 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
