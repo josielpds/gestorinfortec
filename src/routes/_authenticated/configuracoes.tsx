@@ -29,7 +29,7 @@ export const Route = createFileRoute("/_authenticated/configuracoes")({
 function ConfigPage() {
   const qc = useQueryClient();
 
-  const { data: rows = [] } = useQuery({
+  const { data: rows } = useQuery({
     queryKey: ["cfg-all-page"],
     queryFn: async () => (await supabase.from("configuracoes").select("*")).data ?? [],
   });
@@ -49,6 +49,7 @@ function ConfigPage() {
   const [senhaLoading, setSenhaLoading] = useState(false);
 
   useEffect(() => {
+    if (!rows) return;
     const m: Record<string, string> = {};
     rows.forEach((r: any) => {
       m[r.key] = r.value ?? "";
