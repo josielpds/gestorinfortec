@@ -31,6 +31,11 @@ import {
   RotateCcw,
   Tag,
   Layers,
+  Monitor,
+  Copy,
+  Pencil,
+  Trash2,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -63,6 +68,7 @@ type AtendimentoItem = {
 
 type AtendimentosMap = Record<string, AtendimentoItem>;
 type CategoriasClientesMap = Record<string, string>;
+type AcessoRemotoMap = Record<string, string>;
 
 export const ATENDIMENTO_CATEGORIAS = ["EU", "EU-NOC", "IR", "REM"] as const;
 export type AtendimentoCategoria = (typeof ATENDIMENTO_CATEGORIAS)[number];
@@ -111,9 +117,12 @@ function AtendimentosPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("todas");
   const [observacaoModal, setObservacaoModal] = useState<{ cliente: Cliente; item?: AtendimentoItem } | null>(null);
   const [obsText, setObsText] = useState("");
+  const [remoteIdModal, setRemoteIdModal] = useState<{ cliente: Cliente; currentId: string } | null>(null);
+  const [remoteIdText, setRemoteIdText] = useState("");
 
   const storageKey = `atendimentos_${selectedMonth}`;
   const catStorageKey = `atendimentos_categorias_clientes`;
+  const remoteIdStorageKey = `atendimentos_acesso_remoto`;
 
   // 1. Busca lista de clientes cadastrados
   const { data: clientes = [], isLoading: loadingClientes } = useQuery({
@@ -172,6 +181,28 @@ function AtendimentosPage() {
     },
   });
 
+  // 4. Busca os IDs de Acesso Remoto de cada cliente (AnyDesk, TeamViewer, Supremo, etc.)
+  const { data: remoteAccessIds = {} } = useQuery({
+    queryKey: ["atendimentos_acesso_remoto"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("configuracoes")
+        .select("value")
+        .eq("key", remoteIdStorageKey)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data?.value) return {} as AcessoRemotoMap;
+
+      try {
+        const parsed = JSON.parse(data.value);
+        return parsed as AcessoRemotoMap;
+      } catch {
+        return {} as AcessoRemotoMap;
+      }
+    },
+  });
+
   // Mutação para salvar a categoria de um cliente
   const setClientCategory = useMutation({
     mutationFn: async ({ clienteId, categoria }: { clienteId: string; categoria: string | null }) => {
@@ -221,6 +252,77 @@ function AtendimentosPage() {
       qc.invalidateQueries({ queryKey: ["atendimentos_categorias_clientes"] });
     },
   });
+
+  // Mutação para salvar o ID de acesso remoto de um cliente
+  const setRemoteAccessId = useMutation({
+    mutationFn: async ({ clienteId, remoteId }: { clienteId: string; remoteId: string | null }) => {
+      const user_id = await currentUserId();
+      const updated: AcessoRemotoMap = { ...remoteAccessIds };
+      const trimmed = remoteId ? remoteId.trim() : "";
+      if (trimmed) {
+        updated[clienteId] = trimmed;
+      } else {
+        delete updated[clienteId];
+      }
+
+      const { error } = await supabase.from("configuracoes").upsert(
+        {
+          user_id,
+          key: remoteIdStorageKey,
+          value: JSON.stringify(updated),
+        },
+        { onConflict: "user_id,key" }
+      );
+      if (error) throw error;
+      return updated;
+    },
+    onMutate: async ({ clienteId, remoteId }) => {
+      await qc.cancelQueries({ queryKey: ["atendimentos_acesso_remoto"] });
+      const previous = qc.getQueryData<AcessoRemotoMap>(["atendimentos_acesso_remoto"]);
+      const updated: AcessoRemotoMap = { ...(previous || {}) };
+      const trimmed = remoteId ? remoteId.trim() : "";
+      if (trimmed) {
+        updated[clienteId] = trimmed;
+      } else {
+        delete updated[clienteId];
+      }
+      qc.setQueryData(["atendimentos_acesso_remoto"], updated);
+      return { previous };
+    },
+    onError: (err: any, _vars, context) => {
+      if (context?.previous) {
+        qc.setQueryData(["atendimentos_acesso_remoto"], context.previous);
+      }
+      toast.error(`Erro ao salvar ID de acesso remoto: ${err.message}`);
+    },
+    onSuccess: (_, vars) => {
+      toast.success(
+        vars.remoteId && vars.remoteId.trim()
+          ? `ID de Acesso Remoto salvo com sucesso!`
+          : "ID de Acesso Remoto removido."
+      );
+      qc.invalidateQueries({ queryKey: ["atendimentos_acesso_remoto"] });
+    },
+  });
+
+  // Salvar ID de acesso remoto pelo modal
+  const handleSaveRemoteId = () => {
+    if (!remoteIdModal) return;
+    const { cliente } = remoteIdModal;
+    setRemoteAccessId.mutate({
+      clienteId: cliente.id,
+      remoteId: remoteIdText,
+    });
+    setRemoteIdModal(null);
+    setRemoteIdText("");
+  };
+
+  // Copiar ID para área de transferência
+  const copyToClipboard = (text: string, label: string = "ID") => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    toast.success(`${label} copiado: ${text}`);
+  };
 
   // Mutação para salvar os atendimentos no Supabase
   const saveAtendimentos = useMutation({
@@ -359,10 +461,11 @@ function AtendimentosPage() {
     return counts;
   }, [clientes, clientCategories]);
 
-  // Filtros aplicados (Busca + Status Atendimento + Categoria)
+  // Filtros aplicados (Busca + Status Atendimento + Categoria + ID Acesso Remoto)
   const filteredClientes = useMemo(() => {
     return clientes.filter((c) => {
       const clientCat = clientCategories[c.id] || "";
+      const remoteId = remoteAccessIds[c.id] || "";
 
       // Filtro de Categoria
       if (categoryFilter !== "todas") {
@@ -385,7 +488,9 @@ function AtendimentosPage() {
         " " +
         (c.observacoes ?? "") +
         " " +
-        clientCat
+        clientCat +
+        " " +
+        remoteId
       )
         .toLowerCase()
         .includes(search.toLowerCase());
@@ -398,7 +503,7 @@ function AtendimentosPage() {
       if (statusFilter === "nao") return !isAtendido;
       return true;
     });
-  }, [clientes, search, statusFilter, categoryFilter, atendimentosData, clientCategories]);
+  }, [clientes, search, statusFilter, categoryFilter, atendimentosData, clientCategories, remoteAccessIds]);
 
   // Estatísticas do mês considerando filtros
   const stats = useMemo(() => {
@@ -415,6 +520,7 @@ function AtendimentosPage() {
     const headers = [
       "Nome",
       "Categoria Atendimento",
+      "ID Acesso Remoto",
       "Telefone",
       "Email",
       "Documento",
@@ -425,6 +531,7 @@ function AtendimentosPage() {
     const rows = filteredClientes.map((c) => {
       const at = atendimentosData[c.id];
       const cat = clientCategories[c.id] || "Sem Categoria";
+      const remoteId = remoteAccessIds[c.id] || "";
       const atendidoTxt = at?.atendido ? "SIM" : "NÃO";
       const dataTxt = at?.atendido_em ? new Date(at.atendido_em).toLocaleString("pt-BR") : "";
       const obsTxt = (at?.observacao || "").replace(/"/g, '""');
@@ -432,6 +539,7 @@ function AtendimentosPage() {
       return [
         `"${c.nome.replace(/"/g, '""')}"`,
         `"${cat}"`,
+        `"${remoteId.replace(/"/g, '""')}"`,
         `"${c.telefone}"`,
         `"${c.email ?? ""}"`,
         `"${c.documento ?? ""}"`,
@@ -744,7 +852,8 @@ function AtendimentosPage() {
                     <tr>
                       <th className="text-center px-4 py-3 w-28">Atendido?</th>
                       <th className="text-left px-4 py-3">Cliente</th>
-                      <th className="text-left px-4 py-3 w-40">Categoria</th>
+                      <th className="text-left px-4 py-3 w-36">Categoria</th>
+                      <th className="text-left px-4 py-3 min-w-[170px]">ID Acesso Remoto</th>
                       <th className="text-left px-4 py-3">Telefone (WhatsApp)</th>
                       <th className="text-left px-4 py-3">Status no Mês</th>
                       <th className="text-left px-4 py-3">Observações do Mês</th>
@@ -764,6 +873,7 @@ function AtendimentosPage() {
                           })
                         : null;
                       const clientCat = clientCategories[c.id] || "";
+                      const remoteId = remoteAccessIds[c.id] || "";
 
                       return (
                         <tr
@@ -783,7 +893,7 @@ function AtendimentosPage() {
                               />
                               <span
                                 className={`text-xs font-bold w-7 text-left ${
-                                  isAtendido ? "text-success" : "text-muted-foreground"
+                                   isAtendido ? "text-success" : "text-muted-foreground"
                                 }`}
                               >
                                 {isAtendido ? "SIM" : "NÃO"}
@@ -851,6 +961,57 @@ function AtendimentosPage() {
                                 })}
                               </SelectContent>
                             </Select>
+                          </td>
+
+                          {/* ID Acesso Remoto */}
+                          <td className="px-4 py-3.5">
+                            {remoteId ? (
+                              <div className="flex items-center gap-1.5 group">
+                                <Badge
+                                  variant="outline"
+                                  className="font-mono text-xs px-2.5 py-1 bg-muted/60 border-primary/30 text-foreground flex items-center gap-1.5 max-w-[170px] hover:bg-muted transition-colors cursor-pointer select-all"
+                                  onClick={() => copyToClipboard(remoteId, "ID de Acesso Remoto")}
+                                  title="Clique para copiar"
+                                >
+                                  <Monitor className="h-3 w-3 text-primary shrink-0" />
+                                  <span className="truncate font-semibold">{remoteId}</span>
+                                </Badge>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+                                  title="Copiar ID de Acesso Remoto"
+                                  onClick={() => copyToClipboard(remoteId, "ID de Acesso Remoto")}
+                                >
+                                  <Copy className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-muted-foreground hover:text-foreground opacity-70 group-hover:opacity-100 transition-opacity shrink-0 cursor-pointer"
+                                  title="Editar ID de Acesso Remoto"
+                                  onClick={() => {
+                                    setRemoteIdModal({ cliente: c, currentId: remoteId });
+                                    setRemoteIdText(remoteId);
+                                  }}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs border-dashed text-muted-foreground hover:text-foreground hover:border-primary/50 gap-1 font-normal cursor-pointer"
+                                onClick={() => {
+                                  setRemoteIdModal({ cliente: c, currentId: "" });
+                                  setRemoteIdText("");
+                                }}
+                              >
+                                <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
+                                + Inserir ID
+                              </Button>
+                            )}
                           </td>
 
                           {/* Telefone / WhatsApp */}
@@ -990,6 +1151,107 @@ function AtendimentosPage() {
                 Cancelar
               </Button>
               <Button onClick={handleSaveObservacao}>Salvar Nota</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Modal para inserir / editar ID de Acesso Remoto */}
+        <Dialog open={!!remoteIdModal} onOpenChange={(open) => !open && setRemoteIdModal(null)}>
+          <DialogContent className="sm:max-w-[480px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <Monitor className="h-5 w-5 text-primary" />
+                ID de Acesso Remoto: {remoteIdModal?.cliente.nome}
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <p className="text-xs text-muted-foreground">
+                Cadastre o ID do software de acesso remoto (AnyDesk, TeamViewer, RustDesk, Supremo, etc.) deste cliente para acesso rápido sempre que precisar.
+              </p>
+
+              <div className="space-y-2">
+                <Label htmlFor="remote-id-input" className="text-xs font-semibold">
+                  ID / Código de Acesso
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="remote-id-input"
+                    placeholder="Ex: 123 456 789 ou AnyDesk: 987654321"
+                    value={remoteIdText}
+                    onChange={(e) => setRemoteIdText(e.target.value)}
+                    className="font-mono text-sm pr-9"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleSaveRemoteId();
+                      }
+                    }}
+                  />
+                  {remoteIdText && (
+                    <button
+                      type="button"
+                      onClick={() => setRemoteIdText("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Sugestões rápidas de prefixo / tipo */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-medium text-muted-foreground">Adicionar prefixo rápido:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {["AnyDesk: ", "TeamViewer: ", "RustDesk: ", "Supremo: "].map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => {
+                        if (!remoteIdText.startsWith(tag)) {
+                          setRemoteIdText(tag + remoteIdText.replace(/^(AnyDesk|TeamViewer|RustDesk|Supremo):\s*/i, ""));
+                        }
+                      }}
+                      className="text-[11px] px-2 py-0.5 rounded bg-muted hover:bg-primary/15 hover:text-primary transition-colors border text-muted-foreground cursor-pointer"
+                    >
+                      +{tag.trim()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0 flex flex-row items-center justify-between">
+              <div>
+                {remoteIdModal?.currentId ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive hover:bg-destructive/10 text-xs gap-1.5 cursor-pointer"
+                    onClick={() => {
+                      if (confirm(`Deseja remover o ID de acesso remoto de ${remoteIdModal.cliente.nome}?`)) {
+                        setRemoteAccessId.mutate({ clienteId: remoteIdModal.cliente.id, remoteId: null });
+                        setRemoteIdModal(null);
+                        setRemoteIdText("");
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Remover ID
+                  </Button>
+                ) : null}
+              </div>
+              <div className="flex items-center gap-2 ml-auto">
+                <Button variant="outline" onClick={() => setRemoteIdModal(null)}>
+                  Cancelar
+                </Button>
+                <Button onClick={handleSaveRemoteId} disabled={setRemoteAccessId.isPending}>
+                  Salvar ID
+                </Button>
+              </div>
             </DialogFooter>
           </DialogContent>
         </Dialog>
