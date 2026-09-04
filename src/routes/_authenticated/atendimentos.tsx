@@ -30,12 +30,13 @@ import {
   Sparkles,
   RotateCcw,
   Tag,
-  Layers,
   Monitor,
   Copy,
   Pencil,
   Trash2,
-  ExternalLink,
+  FileSpreadsheet,
+  ShieldCheck,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -43,7 +44,7 @@ export const Route = createFileRoute("/_authenticated/atendimentos")({
   head: () => ({
     meta: [
       { title: "Atendimentos — CobraZap" },
-      { name: "description", content: "Controle de atendimentos mensais dos clientes cadastrados." },
+      { name: "description", content: "Controle de atendimentos mensais: Relatórios de Início e Verificação de Final de Mês." },
     ],
   }),
   component: AtendimentosPage,
@@ -67,8 +68,17 @@ type AtendimentoItem = {
 };
 
 type AtendimentosMap = Record<string, AtendimentoItem>;
+
+type MonthAtendimentosData = {
+  inicio: AtendimentosMap;
+  final: AtendimentosMap;
+};
+
 type CategoriasClientesMap = Record<string, string>;
 type AcessoRemotoMap = Record<string, string>;
+
+export type TipoAtendimento = "inicio" | "final";
+export type TipoAtendimentoFilter = "inicio" | "final" | "ambos";
 
 export const ATENDIMENTO_CATEGORIAS = ["EU", "EU-NOC", "IR", "REM"] as const;
 export type AtendimentoCategoria = (typeof ATENDIMENTO_CATEGORIAS)[number];
@@ -112,11 +122,20 @@ function AtendimentosPage() {
   const qc = useQueryClient();
   const currentMonth = todayISO().slice(0, 7);
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonth);
+  const [tipoFilter, setTipoFilter] = useState<TipoAtendimentoFilter>("ambos");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"todos" | "sim" | "nao">("todos");
   const [categoryFilter, setCategoryFilter] = useState<string>("todas");
-  const [observacaoModal, setObservacaoModal] = useState<{ cliente: Cliente; item?: AtendimentoItem } | null>(null);
+
+  // Modal para nota/observação
+  const [observacaoModal, setObservacaoModal] = useState<{
+    cliente: Cliente;
+    tipo: TipoAtendimento;
+    item?: AtendimentoItem;
+  } | null>(null);
   const [obsText, setObsText] = useState("");
+
+  // Modal para ID de acesso remoto
   const [remoteIdModal, setRemoteIdModal] = useState<{ cliente: Cliente; currentId: string } | null>(null);
   const [remoteIdText, setRemoteIdText] = useState("");
 
@@ -137,8 +156,8 @@ function AtendimentosPage() {
     },
   });
 
-  // 2. Busca o registro de atendimentos do mês selecionado
-  const { data: atendimentosData = {}, isLoading: loadingAtendimentos } = useQuery({
+  // 2. Busca o registro de atendimentos do mês (Início + Final) com compatibilidade retroativa
+  const { data: atendimentosData = { inicio: {}, final: {} }, isLoading: loadingAtendimentos } = useQuery<MonthAtendimentosData>({
     queryKey: ["atendimentos", selectedMonth],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -148,19 +167,31 @@ function AtendimentosPage() {
         .maybeSingle();
 
       if (error) throw error;
-      if (!data?.value) return {} as AtendimentosMap;
+      if (!data?.value) return { inicio: {}, final: {} };
 
       try {
         const parsed = JSON.parse(data.value);
-        return (parsed.clientes || parsed) as AtendimentosMap;
+        // Formato novo com separação de início e final
+        if (parsed.inicio || parsed.final) {
+          return {
+            inicio: parsed.inicio || {},
+            final: parsed.final || {},
+          };
+        }
+        // Migração de formato legadado (clientes únicos vão para 'final' ou padrão)
+        const legacy = (parsed.clientes || parsed) as AtendimentosMap;
+        return {
+          inicio: {},
+          final: legacy || {},
+        };
       } catch {
-        return {} as AtendimentosMap;
+        return { inicio: {}, final: {} };
       }
     },
   });
 
   // 3. Busca a atribuição de categorias exclusivas dos atendimentos (EU, EU-NOC, IR, REM)
-  const { data: clientCategories = {} } = useQuery({
+  const { data: clientCategories = {} } = useQuery<CategoriasClientesMap>({
     queryKey: ["atendimentos_categorias_clientes"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -170,19 +201,18 @@ function AtendimentosPage() {
         .maybeSingle();
 
       if (error) throw error;
-      if (!data?.value) return {} as CategoriasClientesMap;
+      if (!data?.value) return {};
 
       try {
-        const parsed = JSON.parse(data.value);
-        return parsed as CategoriasClientesMap;
+        return JSON.parse(data.value) as CategoriasClientesMap;
       } catch {
-        return {} as CategoriasClientesMap;
+        return {};
       }
     },
   });
 
-  // 4. Busca os IDs de Acesso Remoto de cada cliente (AnyDesk, TeamViewer, Supremo, etc.)
-  const { data: remoteAccessIds = {} } = useQuery({
+  // 4. Busca os IDs de Acesso Remoto de cada cliente
+  const { data: remoteAccessIds = {} } = useQuery<AcessoRemotoMap>({
     queryKey: ["atendimentos_acesso_remoto"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -192,13 +222,12 @@ function AtendimentosPage() {
         .maybeSingle();
 
       if (error) throw error;
-      if (!data?.value) return {} as AcessoRemotoMap;
+      if (!data?.value) return {};
 
       try {
-        const parsed = JSON.parse(data.value);
-        return parsed as AcessoRemotoMap;
+        return JSON.parse(data.value) as AcessoRemotoMap;
       } catch {
-        return {} as AcessoRemotoMap;
+        return {};
       }
     },
   });
@@ -326,10 +355,11 @@ function AtendimentosPage() {
 
   // Mutação para salvar os atendimentos no Supabase
   const saveAtendimentos = useMutation({
-    mutationFn: async (newMap: AtendimentosMap) => {
+    mutationFn: async (newData: MonthAtendimentosData) => {
       const user_id = await currentUserId();
       const payload = {
-        clientes: newMap,
+        inicio: newData.inicio,
+        final: newData.final,
         updated_at: new Date().toISOString(),
       };
       const { error } = await supabase.from("configuracoes").upsert(
@@ -341,12 +371,12 @@ function AtendimentosPage() {
         { onConflict: "user_id,key" }
       );
       if (error) throw error;
-      return newMap;
+      return newData;
     },
-    onMutate: async (newMap) => {
+    onMutate: async (newData) => {
       await qc.cancelQueries({ queryKey: ["atendimentos", selectedMonth] });
-      const previous = qc.getQueryData<AtendimentosMap>(["atendimentos", selectedMonth]);
-      qc.setQueryData(["atendimentos", selectedMonth], newMap);
+      const previous = qc.getQueryData<MonthAtendimentosData>(["atendimentos", selectedMonth]);
+      qc.setQueryData(["atendimentos", selectedMonth], newData);
       return { previous };
     },
     onError: (err: any, _vars, context) => {
@@ -360,36 +390,45 @@ function AtendimentosPage() {
     },
   });
 
-  // Alternar atendimento de um cliente específico (Sim / Não)
-  const toggleAtendimento = (clienteId: string, clienteNome: string) => {
-    const current = atendimentosData[clienteId];
-    const willBeAtendido = !current?.atendido;
+  // Alternar atendimento de um cliente específico em um tipo específico (inicio ou final)
+  const toggleAtendimento = (clienteId: string, clienteNome: string, tipo: TipoAtendimento) => {
+    const currentTipoMap = atendimentosData[tipo] || {};
+    const currentItem = currentTipoMap[clienteId];
+    const willBeAtendido = !currentItem?.atendido;
 
-    const updated: AtendimentosMap = {
-      ...atendimentosData,
+    const updatedTipoMap: AtendimentosMap = {
+      ...currentTipoMap,
       [clienteId]: {
-        ...current,
+        ...currentItem,
         atendido: willBeAtendido,
         atendido_em: willBeAtendido ? new Date().toISOString() : undefined,
       },
     };
 
-    saveAtendimentos.mutate(updated);
+    const updatedData: MonthAtendimentosData = {
+      ...atendimentosData,
+      [tipo]: updatedTipoMap,
+    };
+
+    saveAtendimentos.mutate(updatedData);
+
+    const tipoLabel = tipo === "inicio" ? "Relatório (Início)" : "Verificação (Final)";
     if (willBeAtendido) {
-      toast.success(`${clienteNome} marcado como atendido em ${formatMonthLabel(selectedMonth)}!`);
+      toast.success(`${clienteNome}: ${tipoLabel} marcado como realizado em ${formatMonthLabel(selectedMonth)}!`);
     } else {
-      toast.info(`Atendimento de ${clienteNome} desmarcado.`);
+      toast.info(`${clienteNome}: ${tipoLabel} desmarcado.`);
     }
   };
 
   // Salvar anotação/observação do atendimento
   const handleSaveObservacao = () => {
     if (!observacaoModal) return;
-    const { cliente } = observacaoModal;
-    const current = atendimentosData[cliente.id] || { atendido: true, atendido_em: new Date().toISOString() };
+    const { cliente, tipo } = observacaoModal;
+    const currentTipoMap = atendimentosData[tipo] || {};
+    const current = currentTipoMap[cliente.id] || { atendido: true, atendido_em: new Date().toISOString() };
 
-    const updated: AtendimentosMap = {
-      ...atendimentosData,
+    const updatedTipoMap: AtendimentosMap = {
+      ...currentTipoMap,
       [cliente.id]: {
         ...current,
         atendido: true,
@@ -398,43 +437,91 @@ function AtendimentosPage() {
       },
     };
 
-    saveAtendimentos.mutate(updated);
-    toast.success(`Observação de ${cliente.nome} salva!`);
+    const updatedData: MonthAtendimentosData = {
+      ...atendimentosData,
+      [tipo]: updatedTipoMap,
+    };
+
+    saveAtendimentos.mutate(updatedData);
+    const tipoLabel = tipo === "inicio" ? "Relatório (Início)" : "Verificação (Final)";
+    toast.success(`Nota de ${tipoLabel} salva para ${cliente.nome}!`);
     setObservacaoModal(null);
     setObsText("");
   };
 
-  // Marcar todos os clientes filtrados como Sim
+  // Marcar todos os clientes filtrados como Sim (para o tipo ativo ou ambos)
   const handleMarcarTodos = () => {
     if (filteredClientes.length === 0) return;
+
+    const tipoDesc =
+      tipoFilter === "inicio"
+        ? "Relatórios de Início do Mês"
+        : tipoFilter === "final"
+        ? "Verificação de Final do Mês"
+        : "Início e Final do Mês";
+
     if (
       !confirm(
-        `Deseja marcar todos os ${filteredClientes.length} clientes listados como atendidos no mês de ${formatMonthLabel(selectedMonth)}?`
+        `Deseja marcar todos os ${filteredClientes.length} clientes listados como atendidos para [${tipoDesc}] em ${formatMonthLabel(
+          selectedMonth
+        )}?`
       )
     ) {
       return;
     }
 
-    const updated: AtendimentosMap = { ...atendimentosData };
     const now = new Date().toISOString();
+    const updatedInicio = { ...atendimentosData.inicio };
+    const updatedFinal = { ...atendimentosData.final };
+
     filteredClientes.forEach((c) => {
-      updated[c.id] = {
-        ...(updated[c.id] || {}),
-        atendido: true,
-        atendido_em: updated[c.id]?.atendido_em || now,
-      };
+      if (tipoFilter === "inicio" || tipoFilter === "ambos") {
+        updatedInicio[c.id] = {
+          ...(updatedInicio[c.id] || {}),
+          atendido: true,
+          atendido_em: updatedInicio[c.id]?.atendido_em || now,
+        };
+      }
+      if (tipoFilter === "final" || tipoFilter === "ambos") {
+        updatedFinal[c.id] = {
+          ...(updatedFinal[c.id] || {}),
+          atendido: true,
+          atendido_em: updatedFinal[c.id]?.atendido_em || now,
+        };
+      }
     });
 
-    saveAtendimentos.mutate(updated);
-    toast.success(`${filteredClientes.length} clientes marcados como atendidos!`);
+    saveAtendimentos.mutate({
+      inicio: updatedInicio,
+      final: updatedFinal,
+    });
+    toast.success(`${filteredClientes.length} clientes marcados como atendidos (${tipoDesc})!`);
   };
 
   // Limpar/desmarcar todos do mês
   const handleLimparTodos = () => {
-    if (!confirm(`Deseja desmarcar o status de atendimento de todos os clientes no mês de ${formatMonthLabel(selectedMonth)}?`)) {
+    const tipoDesc =
+      tipoFilter === "inicio"
+        ? "Relatórios de Início"
+        : tipoFilter === "final"
+        ? "Verificação de Final"
+        : "todos os atendimentos (Início e Final)";
+
+    if (
+      !confirm(
+        `Deseja desmarcar o status de ${tipoDesc} de todos os clientes no mês de ${formatMonthLabel(selectedMonth)}?`
+      )
+    ) {
       return;
     }
-    saveAtendimentos.mutate({});
+
+    if (tipoFilter === "inicio") {
+      saveAtendimentos.mutate({ ...atendimentosData, inicio: {} });
+    } else if (tipoFilter === "final") {
+      saveAtendimentos.mutate({ ...atendimentosData, final: {} });
+    } else {
+      saveAtendimentos.mutate({ inicio: {}, final: {} });
+    }
     toast.info(`Atendimentos de ${formatMonthLabel(selectedMonth)} foram resetados.`);
   };
 
@@ -461,13 +548,61 @@ function AtendimentosPage() {
     return counts;
   }, [clientes, clientCategories]);
 
-  // Filtros aplicados (Busca + Status Atendimento + Categoria + ID Acesso Remoto)
+  // Estatísticas completas do mês
+  const stats = useMemo(() => {
+    const total = clientes.length;
+
+    const inicioCount = clientes.filter((c) => atendimentosData.inicio[c.id]?.atendido).length;
+    const inicioPendentes = total - inicioCount;
+    const inicioPercent = total > 0 ? Math.round((inicioCount / total) * 100) : 0;
+
+    const finalCount = clientes.filter((c) => atendimentosData.final[c.id]?.atendido).length;
+    const finalPendentes = total - finalCount;
+    const finalPercent = total > 0 ? Math.round((finalCount / total) * 100) : 0;
+
+    const ambosCount = clientes.filter(
+      (c) => atendimentosData.inicio[c.id]?.atendido && atendimentosData.final[c.id]?.atendido
+    ).length;
+    const ambosPercent = total > 0 ? Math.round((ambosCount / total) * 100) : 0;
+
+    // Estatísticas ativas com base no filtro selecionado
+    let currentAtendidos = ambosCount;
+    let currentPendentes = total - ambosCount;
+    let currentPercent = ambosPercent;
+
+    if (tipoFilter === "inicio") {
+      currentAtendidos = inicioCount;
+      currentPendentes = inicioPendentes;
+      currentPercent = inicioPercent;
+    } else if (tipoFilter === "final") {
+      currentAtendidos = finalCount;
+      currentPendentes = finalPendentes;
+      currentPercent = finalPercent;
+    }
+
+    return {
+      total,
+      inicioCount,
+      inicioPendentes,
+      inicioPercent,
+      finalCount,
+      finalPendentes,
+      finalPercent,
+      ambosCount,
+      ambosPercent,
+      currentAtendidos,
+      currentPendentes,
+      currentPercent,
+    };
+  }, [clientes, atendimentosData, tipoFilter]);
+
+  // Filtros aplicados (Busca + Tipo de Atendimento + Status + Categoria)
   const filteredClientes = useMemo(() => {
     return clientes.filter((c) => {
       const clientCat = clientCategories[c.id] || "";
       const remoteId = remoteAccessIds[c.id] || "";
 
-      // Filtro de Categoria
+      // 1. Filtro de Categoria
       if (categoryFilter !== "todas") {
         if (categoryFilter === "sem_categoria") {
           if (clientCat) return false;
@@ -476,7 +611,7 @@ function AtendimentosPage() {
         }
       }
 
-      // Filtro de Busca
+      // 2. Filtro de Busca
       const matchSearch = (
         c.nome +
         " " +
@@ -497,25 +632,26 @@ function AtendimentosPage() {
 
       if (!matchSearch) return false;
 
-      // Filtro de Status de Atendimento no Mês
-      const isAtendido = !!atendimentosData[c.id]?.atendido;
-      if (statusFilter === "sim") return isAtendido;
-      if (statusFilter === "nao") return !isAtendido;
+      // 3. Filtro de Status de Atendimento no Mês
+      const isInicioAtendido = !!atendimentosData.inicio[c.id]?.atendido;
+      const isFinalAtendido = !!atendimentosData.final[c.id]?.atendido;
+
+      if (statusFilter === "sim") {
+        if (tipoFilter === "inicio") return isInicioAtendido;
+        if (tipoFilter === "final") return isFinalAtendido;
+        return isInicioAtendido && isFinalAtendido;
+      }
+      if (statusFilter === "nao") {
+        if (tipoFilter === "inicio") return !isInicioAtendido;
+        if (tipoFilter === "final") return !isFinalAtendido;
+        return !isInicioAtendido || !isFinalAtendido;
+      }
+
       return true;
     });
-  }, [clientes, search, statusFilter, categoryFilter, atendimentosData, clientCategories, remoteAccessIds]);
+  }, [clientes, search, statusFilter, categoryFilter, tipoFilter, atendimentosData, clientCategories, remoteAccessIds]);
 
-  // Estatísticas do mês considerando filtros
-  const stats = useMemo(() => {
-    const total = clientes.length;
-    const atendidosCount = clientes.filter((c) => atendimentosData[c.id]?.atendido).length;
-    const pendentesCount = total - atendidosCount;
-    const porcentagem = total > 0 ? Math.round((atendidosCount / total) * 100) : 0;
-
-    return { total, atendidosCount, pendentesCount, porcentagem };
-  }, [clientes, atendimentosData]);
-
-  // Exportar relatório de atendimentos em CSV
+  // Exportar relatório completo de atendimentos em CSV
   const exportCSV = () => {
     const headers = [
       "Nome",
@@ -524,17 +660,37 @@ function AtendimentosPage() {
       "Telefone",
       "Email",
       "Documento",
-      "Atendido no Mês",
-      "Data/Hora Atendimento",
-      "Observações",
+      "Relatório Início (Status)",
+      "Relatório Início (Data/Hora)",
+      "Relatório Início (Observação)",
+      "Verificação Final (Status)",
+      "Verificação Final (Data/Hora)",
+      "Verificação Final (Observação)",
+      "Status Geral do Mês",
     ];
+
     const rows = filteredClientes.map((c) => {
-      const at = atendimentosData[c.id];
+      const atInicio = atendimentosData.inicio[c.id];
+      const atFinal = atendimentosData.final[c.id];
       const cat = clientCategories[c.id] || "Sem Categoria";
       const remoteId = remoteAccessIds[c.id] || "";
-      const atendidoTxt = at?.atendido ? "SIM" : "NÃO";
-      const dataTxt = at?.atendido_em ? new Date(at.atendido_em).toLocaleString("pt-BR") : "";
-      const obsTxt = (at?.observacao || "").replace(/"/g, '""');
+
+      const inicioStatus = atInicio?.atendido ? "SIM" : "NÃO";
+      const inicioData = atInicio?.atendido_em ? new Date(atInicio.atendido_em).toLocaleString("pt-BR") : "";
+      const inicioObs = (atInicio?.observacao || "").replace(/"/g, '""');
+
+      const finalStatus = atFinal?.atendido ? "SIM" : "NÃO";
+      const finalData = atFinal?.atendido_em ? new Date(atFinal.atendido_em).toLocaleString("pt-BR") : "";
+      const finalObs = (atFinal?.observacao || "").replace(/"/g, '""');
+
+      let statusGeral = "Pendente";
+      if (atInicio?.atendido && atFinal?.atendido) {
+        statusGeral = "100% Concluído (Início e Final)";
+      } else if (atInicio?.atendido) {
+        statusGeral = "Parcial (Somente Início)";
+      } else if (atFinal?.atendido) {
+        statusGeral = "Parcial (Somente Final)";
+      }
 
       return [
         `"${c.nome.replace(/"/g, '""')}"`,
@@ -543,9 +699,13 @@ function AtendimentosPage() {
         `"${c.telefone}"`,
         `"${c.email ?? ""}"`,
         `"${c.documento ?? ""}"`,
-        `"${atendidoTxt}"`,
-        `"${dataTxt}"`,
-        `"${obsTxt}"`,
+        `"${inicioStatus}"`,
+        `"${inicioData}"`,
+        `"${inicioObs}"`,
+        `"${finalStatus}"`,
+        `"${finalData}"`,
+        `"${finalObs}"`,
+        `"${statusGeral}"`,
       ].join(";");
     });
 
@@ -553,53 +713,123 @@ function AtendimentosPage() {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `atendimentos-${selectedMonth}.csv`;
+    link.download = `atendimentos-${selectedMonth}-${tipoFilter}.csv`;
     link.click();
-    toast.success("Relatório de atendimentos exportado com sucesso!");
+    toast.success("Relatório detalhado de atendimentos exportado com sucesso!");
   };
 
   return (
     <AppLayout>
-      <div className="p-4 sm:p-6 lg:p-8 max-w-[1400px]">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1440px]">
         <PageHeader
-          title="Atendimentos"
-          subtitle="Controle e confirme os atendimentos mensais de cada cliente por categoria"
+          title="Atendimentos Mensais"
+          subtitle="Controle independente de Relatórios de Início do Mês e Verificação de Final de Mês"
           action={
             <div className="flex flex-wrap items-center gap-2">
               <Button variant="outline" size="sm" onClick={exportCSV} disabled={clientes.length === 0}>
                 <Download className="h-4 w-4 mr-2" />
-                Exportar CSV
+                Exportar CSV Completo
               </Button>
             </div>
           }
         />
 
-        {/* Barra superior de Filtro por Mês */}
-        <Card className="mb-6 border-primary/20 bg-card/60 backdrop-blur-sm shadow-sm">
-          <CardContent className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        {/* 1. Barra Superior: Mês de Referência e Seletor do Tipo de Atendimento */}
+        <Card className="mb-6 border-primary/20 bg-card/70 backdrop-blur-sm shadow-sm">
+          <CardContent className="py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            {/* Mês e Título */}
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                <CalendarCheck className="h-5 w-5" />
+              <div className="h-11 w-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <CalendarCheck className="h-6 w-6" />
               </div>
               <div>
-                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Mês de Referência
                 </div>
-                <div className="text-base font-bold text-foreground">
+                <div className="text-lg font-bold text-foreground">
                   {formatMonthLabel(selectedMonth)}
                 </div>
               </div>
             </div>
 
-            <MonthFilter
-              selectedMonth={selectedMonth}
-              onChange={(m) => setSelectedMonth(m === "todos" ? currentMonth : m)}
-              allowAll={false}
-            />
+            {/* Seletor de Tipo / Ciclo de Atendimento */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground mr-1 hidden sm:inline-block">
+                Ciclo do Mês:
+              </div>
+              <div className="flex items-center bg-muted/80 p-1 rounded-xl border">
+                <button
+                  type="button"
+                  onClick={() => setTipoFilter("inicio")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    tipoFilter === "inicio"
+                      ? "bg-blue-600 text-white shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                  <span>Relatórios (Início)</span>
+                  <span
+                    className={`text-[11px] px-1.5 py-0.2 rounded-full ${
+                      tipoFilter === "inicio" ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {stats.inicioCount}/{stats.total}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTipoFilter("final")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    tipoFilter === "final"
+                      ? "bg-emerald-600 text-white shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  <span>Verificação (Final)</span>
+                  <span
+                    className={`text-[11px] px-1.5 py-0.2 rounded-full ${
+                      tipoFilter === "final" ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {stats.finalCount}/{stats.total}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTipoFilter("ambos")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    tipoFilter === "ambos"
+                      ? "bg-primary text-primary-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <Layers className="h-3.5 w-3.5" />
+                  <span>Visão Completa</span>
+                  <span
+                    className={`text-[11px] px-1.5 py-0.2 rounded-full ${
+                      tipoFilter === "ambos" ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {stats.ambosCount}/{stats.total}
+                  </span>
+                </button>
+              </div>
+
+              {/* Seletor do Mês */}
+              <MonthFilter
+                selectedMonth={selectedMonth}
+                onChange={(m) => setSelectedMonth(m === "todos" ? currentMonth : m)}
+                allowAll={false}
+              />
+            </div>
           </CardContent>
         </Card>
 
-        {/* Cards de Métricas do Mês */}
+        {/* 2. Cards de Métricas e Indicadores do Mês */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card className="shadow-sm">
             <CardContent className="p-5 flex items-center justify-between">
@@ -614,54 +844,93 @@ function AtendimentosPage() {
             </CardContent>
           </Card>
 
-          <Card className="shadow-sm border-success/30 bg-success/5">
+          {/* Relatórios de Início */}
+          <Card
+            className={`shadow-sm transition-all cursor-pointer border ${
+              tipoFilter === "inicio" ? "ring-2 ring-blue-500/50 bg-blue-500/5 border-blue-400/40" : "hover:border-blue-300"
+            }`}
+            onClick={() => setTipoFilter("inicio")}
+          >
             <CardContent className="p-5 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold text-success uppercase tracking-wide">Atendidos (Sim)</p>
-                <p className="text-2xl font-bold text-success mt-1">{stats.atendidosCount}</p>
-                <p className="text-xs text-success/80 mt-0.5">{stats.porcentagem}% do total</p>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-blue-500" />
+                  <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide">
+                    Relatórios (Início)
+                  </p>
+                </div>
+                <p className="text-2xl font-bold text-blue-700 dark:text-blue-400 mt-1">
+                  {stats.inicioCount}{" "}
+                  <span className="text-xs font-normal text-muted-foreground">/ {stats.total}</span>
+                </p>
+                <p className="text-xs text-blue-600/80 dark:text-blue-400/80 mt-0.5 font-medium">
+                  {stats.inicioPercent}% concluídos ({stats.inicioPendentes} pendentes)
+                </p>
               </div>
-              <div className="h-12 w-12 rounded-xl bg-success/15 flex items-center justify-center text-success">
+              <div className="h-12 w-12 rounded-xl bg-blue-500/15 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <FileSpreadsheet className="h-6 w-6" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Verificação de Final */}
+          <Card
+            className={`shadow-sm transition-all cursor-pointer border ${
+              tipoFilter === "final" ? "ring-2 ring-emerald-500/50 bg-emerald-500/5 border-emerald-400/40" : "hover:border-emerald-300"
+            }`}
+            onClick={() => setTipoFilter("final")}
+          >
+            <CardContent className="p-5 flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">
+                    Verificação (Final)
+                  </p>
+                </div>
+                <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400 mt-1">
+                  {stats.finalCount}{" "}
+                  <span className="text-xs font-normal text-muted-foreground">/ {stats.total}</span>
+                </p>
+                <p className="text-xs text-emerald-600/80 dark:text-emerald-400/80 mt-0.5 font-medium">
+                  {stats.finalPercent}% concluídos ({stats.finalPendentes} pendentes)
+                </p>
+              </div>
+              <div className="h-12 w-12 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                <ShieldCheck className="h-6 w-6" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 100% Concluídos no Mês (Ambos) */}
+          <Card
+            className={`shadow-sm transition-all cursor-pointer border ${
+              tipoFilter === "ambos" ? "ring-2 ring-primary/50 bg-primary/5 border-primary/40" : "hover:border-primary/30"
+            }`}
+            onClick={() => setTipoFilter("ambos")}
+          >
+            <CardContent className="p-5 flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-primary" />
+                  <p className="text-xs font-semibold text-primary uppercase tracking-wide">100% Concluídos</p>
+                </div>
+                <p className="text-2xl font-bold text-primary mt-1">
+                  {stats.ambosCount}{" "}
+                  <span className="text-xs font-normal text-muted-foreground">/ {stats.total}</span>
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5 font-medium">
+                  {stats.ambosPercent}% com Início e Final OK
+                </p>
+              </div>
+              <div className="h-12 w-12 rounded-xl bg-primary/15 flex items-center justify-center text-primary">
                 <CheckCircle2 className="h-6 w-6" />
               </div>
             </CardContent>
           </Card>
-
-          <Card className="shadow-sm border-amber-500/30 bg-amber-500/5">
-            <CardContent className="p-5 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
-                  Pendentes (Não)
-                </p>
-                <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">{stats.pendentesCount}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Aguardando atendimento</p>
-              </div>
-              <div className="h-12 w-12 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-600 dark:text-amber-400">
-                <UserX className="h-6 w-6" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm">
-            <CardContent className="p-5">
-              <div className="flex justify-between items-center mb-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Progresso Mensal</p>
-                <span className="text-sm font-bold text-primary">{stats.porcentagem}%</span>
-              </div>
-              <div className="w-full bg-muted rounded-full h-2.5 mb-2 overflow-hidden">
-                <div
-                  className="bg-primary h-2.5 rounded-full transition-all duration-500"
-                  style={{ width: `${stats.porcentagem}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                {stats.atendidosCount} de {stats.total} clientes confirmados
-              </p>
-            </CardContent>
-          </Card>
         </div>
 
-        {/* Barra de Filtro de Categorias */}
+        {/* 3. Barra de Filtro de Categorias (EU, EU-NOC, IR, REM) */}
         <Card className="mb-4 bg-muted/20 border">
           <CardContent className="p-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -695,9 +964,7 @@ function AtendimentosPage() {
                       type="button"
                       onClick={() => setCategoryFilter(cat)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border flex items-center gap-1.5 ${
-                        active
-                          ? `${style.pill} border-transparent shadow-xs`
-                          : `${style.badge} bg-background/80`
+                        active ? `${style.pill} border-transparent shadow-xs` : `${style.badge} bg-background/80`
                       }`}
                     >
                       <span className={`h-2 w-2 rounded-full ${active ? "bg-white" : style.dot}`} />
@@ -723,13 +990,13 @@ function AtendimentosPage() {
           </CardContent>
         </Card>
 
-        {/* Filtros rápidos de Status e Busca */}
+        {/* 4. Barra de Busca, Filtro de Status e Ações Rápidas */}
         <Card className="mb-4">
           <CardContent className="p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar por cliente, telefone, documento..."
+                placeholder="Buscar por cliente, telefone, documento, ID remoto..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-9 h-9"
@@ -759,7 +1026,7 @@ function AtendimentosPage() {
                   }`}
                 >
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  Atendidos ({stats.atendidosCount})
+                  Atendidos ({stats.currentAtendidos})
                 </button>
                 <button
                   type="button"
@@ -771,7 +1038,7 @@ function AtendimentosPage() {
                   }`}
                 >
                   <XCircle className="h-3.5 w-3.5" />
-                  Pendentes ({stats.pendentesCount})
+                  Pendentes ({stats.currentPendentes})
                 </button>
               </div>
 
@@ -780,14 +1047,14 @@ function AtendimentosPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 text-xs"
+                    className="h-8 text-xs font-semibold"
                     onClick={handleMarcarTodos}
                     title="Marcar todos visíveis como atendidos"
                   >
                     <Sparkles className="h-3.5 w-3.5 mr-1 text-primary" />
-                    Marcar todos Sim
+                    Marcar Todos Sim
                   </Button>
-                  {stats.atendidosCount > 0 && (
+                  {(stats.inicioCount > 0 || stats.finalCount > 0) && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -805,18 +1072,29 @@ function AtendimentosPage() {
           </CardContent>
         </Card>
 
-        {/* Tabela de Clientes Espelhada */}
+        {/* 5. Tabela Principal de Clientes e Confirmações */}
         <Card className="shadow-sm overflow-hidden">
-          <CardHeader className="bg-muted/30 border-b py-3 px-4 flex flex-row items-center justify-between">
+          <CardHeader className="bg-muted/30 border-b py-3.5 px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
                 <Users className="h-4 w-4 text-primary" />
-                Clientes e Confirmação de Atendimento
+                Clientes e Confirmação de Atendimentos
               </CardTitle>
               <CardDescription className="text-xs">
-                Mês de {formatMonthLabel(selectedMonth)} • {filteredClientes.length} cliente(s) listado(s)
+                Mês de {formatMonthLabel(selectedMonth)} • {filteredClientes.length} cliente(s) listado(s) •{" "}
+                <span className="font-semibold text-foreground">
+                  Modo:{" "}
+                  {tipoFilter === "inicio"
+                    ? "📋 Relatórios de Início do Mês"
+                    : tipoFilter === "final"
+                    ? "🔍 Verificação de Final de Mês"
+                    : "📊 Visão Completa (Início + Final)"}
+                </span>
                 {categoryFilter !== "todas" && (
-                  <span className="font-semibold text-primary"> • Categoria: {categoryFilter === "sem_categoria" ? "Sem Categoria" : categoryFilter}</span>
+                  <span className="font-semibold text-primary">
+                    {" "}
+                    • Categoria: {categoryFilter === "sem_categoria" ? "Sem Categoria" : categoryFilter}
+                  </span>
                 )}
               </CardDescription>
             </div>
@@ -840,7 +1118,8 @@ function AtendimentosPage() {
                     <Search className="h-10 w-10 mx-auto text-muted-foreground/50 mb-2" />
                     <p className="font-medium">Nenhum cliente encontrado com os filtros selecionados</p>
                     <p className="text-xs mt-1">
-                      Tente ajustar o termo de busca, a categoria ({categoryFilter}) ou o filtro de status ({statusFilter}).
+                      Tente ajustar o termo de busca, a categoria ({categoryFilter}) ou o filtro de status (
+                      {statusFilter}).
                     </p>
                   </div>
                 )}
@@ -850,28 +1129,74 @@ function AtendimentosPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
                     <tr>
-                      <th className="text-center px-4 py-3 w-28">Atendido?</th>
-                      <th className="text-left px-4 py-3">Cliente</th>
+                      <th className="text-left px-4 py-3 min-w-[200px]">Cliente</th>
                       <th className="text-left px-4 py-3 w-36">Categoria</th>
                       <th className="text-left px-4 py-3 min-w-[170px]">ID Acesso Remoto</th>
-                      <th className="text-left px-4 py-3">Telefone (WhatsApp)</th>
-                      <th className="text-left px-4 py-3">Status no Mês</th>
-                      <th className="text-left px-4 py-3">Observações do Mês</th>
-                      <th className="text-right px-4 py-3">Ações Rápidas</th>
+                      <th className="text-left px-4 py-3 min-w-[160px]">Telefone (WhatsApp)</th>
+
+                      {/* Colunas no Modo "Início" */}
+                      {tipoFilter === "inicio" && (
+                        <>
+                          <th className="text-center px-4 py-3 min-w-[130px] bg-blue-500/5 text-blue-700 dark:text-blue-400">
+                            Relatório (Início)?
+                          </th>
+                          <th className="text-left px-4 py-3">Status Início</th>
+                          <th className="text-left px-4 py-3">Observações Início</th>
+                          <th className="text-right px-4 py-3">Ação Rápida</th>
+                        </>
+                      )}
+
+                      {/* Colunas no Modo "Final" */}
+                      {tipoFilter === "final" && (
+                        <>
+                          <th className="text-center px-4 py-3 min-w-[130px] bg-emerald-500/5 text-emerald-700 dark:text-emerald-400">
+                            Verificação (Final)?
+                          </th>
+                          <th className="text-left px-4 py-3">Status Final</th>
+                          <th className="text-left px-4 py-3">Observações Final</th>
+                          <th className="text-right px-4 py-3">Ação Rápida</th>
+                        </>
+                      )}
+
+                      {/* Colunas no Modo "Ambos / Visão Completa" */}
+                      {tipoFilter === "ambos" && (
+                        <>
+                          <th className="text-center px-4 py-3 min-w-[170px] bg-blue-500/5 text-blue-700 dark:text-blue-400 border-l">
+                            📋 Relatório (Início)
+                          </th>
+                          <th className="text-center px-4 py-3 min-w-[170px] bg-emerald-500/5 text-emerald-700 dark:text-emerald-400 border-l">
+                            🔍 Verificação (Final)
+                          </th>
+                          <th className="text-center px-4 py-3 min-w-[130px] border-l">Progresso Mês</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {filteredClientes.map((c) => {
-                      const item = atendimentosData[c.id];
-                      const isAtendido = !!item?.atendido;
-                      const atendidoEm = item?.atendido_em
-                        ? new Date(item.atendido_em).toLocaleDateString("pt-BR", {
+                      const itemInicio = atendimentosData.inicio[c.id];
+                      const itemFinal = atendimentosData.final[c.id];
+                      const isInicioAtendido = !!itemInicio?.atendido;
+                      const isFinalAtendido = !!itemFinal?.atendido;
+
+                      const atendidoEmInicio = itemInicio?.atendido_em
+                        ? new Date(itemInicio.atendido_em).toLocaleDateString("pt-BR", {
                             day: "2-digit",
                             month: "2-digit",
                             hour: "2-digit",
                             minute: "2-digit",
                           })
                         : null;
+
+                      const atendidoEmFinal = itemFinal?.atendido_em
+                        ? new Date(itemFinal.atendido_em).toLocaleDateString("pt-BR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : null;
+
                       const clientCat = clientCategories[c.id] || "";
                       const remoteId = remoteAccessIds[c.id] || "";
 
@@ -879,28 +1204,13 @@ function AtendimentosPage() {
                         <tr
                           key={c.id}
                           className={`transition-colors hover:bg-muted/30 ${
-                            isAtendido ? "bg-success/[0.02]" : ""
+                            isInicioAtendido && isFinalAtendido
+                              ? "bg-success/[0.03]"
+                              : isInicioAtendido || isFinalAtendido
+                              ? "bg-primary/[0.02]"
+                              : ""
                           }`}
                         >
-                          {/* Opção de Marcar com Sim/Não */}
-                          <td className="px-4 py-3.5 text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <Switch
-                                checked={isAtendido}
-                                onCheckedChange={() => toggleAtendimento(c.id, c.nome)}
-                                className="data-[state=checked]:bg-success"
-                                aria-label={`Marcar ${c.nome} como atendido`}
-                              />
-                              <span
-                                className={`text-xs font-bold w-7 text-left ${
-                                   isAtendido ? "text-success" : "text-muted-foreground"
-                                }`}
-                              >
-                                {isAtendido ? "SIM" : "NÃO"}
-                              </span>
-                            </div>
-                          </td>
-
                           {/* Dados do Cliente */}
                           <td className="px-4 py-3.5">
                             <div className="font-semibold text-foreground flex items-center gap-2">
@@ -917,7 +1227,7 @@ function AtendimentosPage() {
                             </div>
                           </td>
 
-                          {/* Seleção de Categoria (EU, EU-NOC, IR, REM) */}
+                          {/* Categoria */}
                           <td className="px-4 py-3.5">
                             <Select
                               value={clientCat || "none"}
@@ -1030,86 +1340,310 @@ function AtendimentosPage() {
                             </div>
                           </td>
 
-                          {/* Status no Mês */}
-                          <td className="px-4 py-3.5">
-                            {isAtendido ? (
-                              <div className="space-y-0.5">
-                                <Badge className="bg-success/15 text-success hover:bg-success/20 border-success/30 font-medium gap-1">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Atendido (SIM)
-                                </Badge>
-                                {atendidoEm && (
-                                  <div className="text-[11px] text-muted-foreground flex items-center gap-1">
-                                    <Clock className="h-3 w-3" />
-                                    Confirmado em {atendidoEm}
+                          {/* VISUALIZAÇÃO MODO INÍCIO */}
+                          {tipoFilter === "inicio" && (
+                            <>
+                              <td className="px-4 py-3.5 text-center bg-blue-500/[0.02]">
+                                <div className="flex items-center justify-center gap-2">
+                                  <Switch
+                                    checked={isInicioAtendido}
+                                    onCheckedChange={() => toggleAtendimento(c.id, c.nome, "inicio")}
+                                    className="data-[state=checked]:bg-blue-600"
+                                  />
+                                  <span
+                                    className={`text-xs font-bold w-7 text-left ${
+                                      isInicioAtendido ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground"
+                                    }`}
+                                  >
+                                    {isInicioAtendido ? "SIM" : "NÃO"}
+                                  </span>
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-3.5">
+                                {isInicioAtendido ? (
+                                  <div className="space-y-0.5">
+                                    <Badge className="bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-400/30 font-medium gap-1">
+                                      <CheckCircle2 className="h-3 w-3" />
+                                      Relatório Enviado
+                                    </Badge>
+                                    {atendidoEmInicio && (
+                                      <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                                        <Clock className="h-3 w-3" />
+                                        {atendidoEmInicio}
+                                      </div>
+                                    )}
                                   </div>
-                                )}
-                              </div>
-                            ) : (
-                              <Badge variant="outline" className="text-muted-foreground border-dashed gap-1 font-normal">
-                                <XCircle className="h-3 w-3 text-muted-foreground" />
-                                Pendente (NÃO)
-                              </Badge>
-                            )}
-                          </td>
-
-                          {/* Observações do Atendimento */}
-                          <td className="px-4 py-3.5">
-                            {item?.observacao ? (
-                              <div
-                                onClick={() => {
-                                  setObservacaoModal({ cliente: c, item });
-                                  setObsText(item.observacao || "");
-                                }}
-                                className="cursor-pointer group flex items-start gap-1.5 text-xs text-muted-foreground hover:text-foreground max-w-xs"
-                                title="Clique para editar observação"
-                              >
-                                <FileText className="h-3.5 w-3.5 shrink-0 text-primary mt-0.5" />
-                                <span className="truncate group-hover:underline">{item.observacao}</span>
-                              </div>
-                            ) : (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs text-muted-foreground hover:text-foreground px-2"
-                                onClick={() => {
-                                  setObservacaoModal({ cliente: c, item });
-                                  setObsText("");
-                                }}
-                              >
-                                <FileText className="h-3.5 w-3.5 mr-1" />
-                                + Nota
-                              </Button>
-                            )}
-                          </td>
-
-                          {/* Ações Rápidas */}
-                          <td className="px-4 py-3.5 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                size="sm"
-                                variant={isAtendido ? "outline" : "default"}
-                                className={`h-8 text-xs font-semibold ${
-                                  isAtendido
-                                    ? "text-success border-success/30 hover:bg-success/10 hover:text-success"
-                                    : "bg-primary hover:bg-primary/90"
-                                }`}
-                                onClick={() => toggleAtendimento(c.id, c.nome)}
-                              >
-                                {isAtendido ? (
-                                  <>
-                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
-                                    Confirmado
-                                  </>
                                 ) : (
-                                  <>
-                                    <UserCheck className="h-3.5 w-3.5 mr-1.5" />
-                                    Marcar SIM
-                                  </>
+                                  <Badge variant="outline" className="text-muted-foreground border-dashed gap-1 font-normal">
+                                    <XCircle className="h-3 w-3 text-muted-foreground" />
+                                    Pendente
+                                  </Badge>
                                 )}
-                              </Button>
-                            </div>
-                          </td>
+                              </td>
+
+                              <td className="px-4 py-3.5">
+                                {itemInicio?.observacao ? (
+                                  <div
+                                    onClick={() => {
+                                      setObservacaoModal({ cliente: c, tipo: "inicio", item: itemInicio });
+                                      setObsText(itemInicio.observacao || "");
+                                    }}
+                                    className="cursor-pointer group flex items-start gap-1.5 text-xs text-muted-foreground hover:text-foreground max-w-xs"
+                                    title="Clique para editar nota de relatório"
+                                  >
+                                    <FileText className="h-3.5 w-3.5 shrink-0 text-blue-500 mt-0.5" />
+                                    <span className="truncate group-hover:underline">{itemInicio.observacao}</span>
+                                  </div>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs text-muted-foreground hover:text-foreground px-2"
+                                    onClick={() => {
+                                      setObservacaoModal({ cliente: c, tipo: "inicio", item: itemInicio });
+                                      setObsText("");
+                                    }}
+                                  >
+                                    <FileText className="h-3.5 w-3.5 mr-1" />
+                                    + Nota
+                                  </Button>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-3.5 text-right">
+                                <Button
+                                  size="sm"
+                                  variant={isInicioAtendido ? "outline" : "default"}
+                                  className={`h-8 text-xs font-semibold ${
+                                    isInicioAtendido
+                                      ? "text-blue-600 border-blue-400/30 hover:bg-blue-50"
+                                      : "bg-blue-600 hover:bg-blue-700 text-white"
+                                  }`}
+                                  onClick={() => toggleAtendimento(c.id, c.nome, "inicio")}
+                                >
+                                  {isInicioAtendido ? (
+                                    <>
+                                      <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+                                      Relatório OK
+                                    </>
+                                  ) : (
+                                    <>
+                                      <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
+                                      Confirmar Início
+                                    </>
+                                  )}
+                                </Button>
+                              </td>
+                            </>
+                          )}
+
+                          {/* VISUALIZAÇÃO MODO FINAL */}
+                          {tipoFilter === "final" && (
+                            <>
+                              <td className="px-4 py-3.5 text-center bg-emerald-500/[0.02]">
+                                <div className="flex items-center justify-center gap-2">
+                                  <Switch
+                                    checked={isFinalAtendido}
+                                    onCheckedChange={() => toggleAtendimento(c.id, c.nome, "final")}
+                                    className="data-[state=checked]:bg-emerald-600"
+                                  />
+                                  <span
+                                    className={`text-xs font-bold w-7 text-left ${
+                                      isFinalAtendido ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+                                    }`}
+                                  >
+                                    {isFinalAtendido ? "SIM" : "NÃO"}
+                                  </span>
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-3.5">
+                                {isFinalAtendido ? (
+                                  <div className="space-y-0.5">
+                                    <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-400/30 font-medium gap-1">
+                                      <CheckCircle2 className="h-3 w-3" />
+                                      Verificado
+                                    </Badge>
+                                    {atendidoEmFinal && (
+                                      <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                                        <Clock className="h-3 w-3" />
+                                        {atendidoEmFinal}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <Badge variant="outline" className="text-muted-foreground border-dashed gap-1 font-normal">
+                                    <XCircle className="h-3 w-3 text-muted-foreground" />
+                                    Pendente
+                                  </Badge>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-3.5">
+                                {itemFinal?.observacao ? (
+                                  <div
+                                    onClick={() => {
+                                      setObservacaoModal({ cliente: c, tipo: "final", item: itemFinal });
+                                      setObsText(itemFinal.observacao || "");
+                                    }}
+                                    className="cursor-pointer group flex items-start gap-1.5 text-xs text-muted-foreground hover:text-foreground max-w-xs"
+                                    title="Clique para editar nota de verificação final"
+                                  >
+                                    <FileText className="h-3.5 w-3.5 shrink-0 text-emerald-500 mt-0.5" />
+                                    <span className="truncate group-hover:underline">{itemFinal.observacao}</span>
+                                  </div>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 text-xs text-muted-foreground hover:text-foreground px-2"
+                                    onClick={() => {
+                                      setObservacaoModal({ cliente: c, tipo: "final", item: itemFinal });
+                                      setObsText("");
+                                    }}
+                                  >
+                                    <FileText className="h-3.5 w-3.5 mr-1" />
+                                    + Nota
+                                  </Button>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-3.5 text-right">
+                                <Button
+                                  size="sm"
+                                  variant={isFinalAtendido ? "outline" : "default"}
+                                  className={`h-8 text-xs font-semibold ${
+                                    isFinalAtendido
+                                      ? "text-emerald-600 border-emerald-400/30 hover:bg-emerald-50"
+                                      : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  }`}
+                                  onClick={() => toggleAtendimento(c.id, c.nome, "final")}
+                                >
+                                  {isFinalAtendido ? (
+                                    <>
+                                      <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+                                      Verificado OK
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />
+                                      Confirmar Final
+                                    </>
+                                  )}
+                                </Button>
+                              </td>
+                            </>
+                          )}
+
+                          {/* VISUALIZAÇÃO MODO AMBOS / VISÃO COMPLETA */}
+                          {tipoFilter === "ambos" && (
+                            <>
+                              {/* Coluna Início */}
+                              <td className="px-4 py-3 text-center bg-blue-500/[0.02] border-l">
+                                <div className="flex flex-col items-center gap-1.5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <Switch
+                                      checked={isInicioAtendido}
+                                      onCheckedChange={() => toggleAtendimento(c.id, c.nome, "inicio")}
+                                      className="data-[state=checked]:bg-blue-600"
+                                    />
+                                    <span
+                                      className={`text-xs font-bold w-7 text-left ${
+                                        isInicioAtendido ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground"
+                                      }`}
+                                    >
+                                      {isInicioAtendido ? "SIM" : "NÃO"}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-1">
+                                    {atendidoEmInicio ? (
+                                      <span className="text-[10px] text-muted-foreground">{atendidoEmInicio}</span>
+                                    ) : (
+                                      <span className="text-[10px] text-muted-foreground/60 italic">Não enviado</span>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setObservacaoModal({ cliente: c, tipo: "inicio", item: itemInicio });
+                                        setObsText(itemInicio?.observacao || "");
+                                      }}
+                                      className={`p-1 rounded hover:bg-muted transition-colors ${
+                                        itemInicio?.observacao ? "text-blue-600 font-bold" : "text-muted-foreground/60"
+                                      }`}
+                                      title={itemInicio?.observacao || "Adicionar nota de Início"}
+                                    >
+                                      <FileText className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Coluna Final */}
+                              <td className="px-4 py-3 text-center bg-emerald-500/[0.02] border-l">
+                                <div className="flex flex-col items-center gap-1.5">
+                                  <div className="flex items-center justify-center gap-2">
+                                    <Switch
+                                      checked={isFinalAtendido}
+                                      onCheckedChange={() => toggleAtendimento(c.id, c.nome, "final")}
+                                      className="data-[state=checked]:bg-emerald-600"
+                                    />
+                                    <span
+                                      className={`text-xs font-bold w-7 text-left ${
+                                        isFinalAtendido ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+                                      }`}
+                                    >
+                                      {isFinalAtendido ? "SIM" : "NÃO"}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-1">
+                                    {atendidoEmFinal ? (
+                                      <span className="text-[10px] text-muted-foreground">{atendidoEmFinal}</span>
+                                    ) : (
+                                      <span className="text-[10px] text-muted-foreground/60 italic">Não verificado</span>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setObservacaoModal({ cliente: c, tipo: "final", item: itemFinal });
+                                        setObsText(itemFinal?.observacao || "");
+                                      }}
+                                      className={`p-1 rounded hover:bg-muted transition-colors ${
+                                        itemFinal?.observacao ? "text-emerald-600 font-bold" : "text-muted-foreground/60"
+                                      }`}
+                                      title={itemFinal?.observacao || "Adicionar nota de Final"}
+                                    >
+                                      <FileText className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Progresso Geral */}
+                              <td className="px-4 py-3.5 text-center border-l">
+                                {isInicioAtendido && isFinalAtendido ? (
+                                  <Badge className="bg-success text-success-foreground font-semibold text-xs gap-1">
+                                    <CheckCircle2 className="h-3 w-3" />
+                                    100% OK (2/2)
+                                  </Badge>
+                                ) : isInicioAtendido || isFinalAtendido ? (
+                                  <Badge variant="outline" className="text-amber-600 border-amber-400/50 bg-amber-500/10 font-medium text-xs gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    Parcial (1/2)
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-muted-foreground border-dashed text-xs gap-1 font-normal">
+                                    <XCircle className="h-3 w-3 text-muted-foreground" />
+                                    Pendente (0/2)
+                                  </Badge>
+                                )}
+                              </td>
+                            </>
+                          )}
                         </tr>
                       );
                     })}
@@ -1120,28 +1654,48 @@ function AtendimentosPage() {
           </CardContent>
         </Card>
 
-        {/* Modal para anotação/observação rápida do atendimento */}
+        {/* Modal para anotação/observação específica (Início ou Final) */}
         <Dialog open={!!observacaoModal} onOpenChange={(open) => !open && setObservacaoModal(null)}>
-          <DialogContent className="sm:max-w-[480px]">
+          <DialogContent className="sm:max-w-[500px]">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-base">
-                <FileText className="h-5 w-5 text-primary" />
-                Nota de Atendimento: {observacaoModal?.cliente.nome}
+                {observacaoModal?.tipo === "inicio" ? (
+                  <FileSpreadsheet className="h-5 w-5 text-blue-600" />
+                ) : (
+                  <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                )}
+                Nota:{" "}
+                {observacaoModal?.tipo === "inicio"
+                  ? "Relatório de Início do Mês"
+                  : "Verificação de Final de Mês"}
               </DialogTitle>
             </DialogHeader>
 
             <div className="space-y-3 py-2">
-              <div className="text-xs text-muted-foreground">
-                Mês de referência: <strong className="text-foreground">{formatMonthLabel(selectedMonth)}</strong>
+              <div className="text-xs text-muted-foreground flex flex-col gap-0.5">
+                <div>
+                  Cliente: <strong className="text-foreground">{observacaoModal?.cliente.nome}</strong>
+                </div>
+                <div>
+                  Mês de referência: <strong className="text-foreground">{formatMonthLabel(selectedMonth)}</strong>
+                </div>
               </div>
+
               <div className="space-y-1.5">
-                <Label htmlFor="obs-text">Observações sobre o atendimento</Label>
+                <Label htmlFor="obs-text" className="text-xs font-semibold">
+                  Observações sobre este atendimento
+                </Label>
                 <Textarea
                   id="obs-text"
-                  placeholder="Ex: Suporte técnico presencial, atualização de sistema realizada, contato por telefone..."
+                  placeholder={
+                    observacaoModal?.tipo === "inicio"
+                      ? "Ex: Relatório mensal de faturamento enviado por e-mail, cliente confirmou recebimento..."
+                      : "Ex: Verificação de backup concluída, suporte de encerramento mensal realizado com sucesso..."
+                  }
                   rows={4}
                   value={obsText}
                   onChange={(e) => setObsText(e.target.value)}
+                  autoFocus
                 />
               </div>
             </div>
@@ -1150,7 +1704,16 @@ function AtendimentosPage() {
               <Button variant="outline" onClick={() => setObservacaoModal(null)}>
                 Cancelar
               </Button>
-              <Button onClick={handleSaveObservacao}>Salvar Nota</Button>
+              <Button
+                onClick={handleSaveObservacao}
+                className={
+                  observacaoModal?.tipo === "inicio"
+                    ? "bg-blue-600 hover:bg-blue-700 text-white"
+                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                }
+              >
+                Salvar Nota
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
