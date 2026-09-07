@@ -75,6 +75,10 @@ type MonthAtendimentosData = {
 };
 
 type CategoriasClientesMap = Record<string, string>;
+type CategoriasPorTipo = {
+  inicio: CategoriasClientesMap;
+  final: CategoriasClientesMap;
+};
 type AcessoRemotoMap = Record<string, string>;
 
 export type TipoAtendimento = "inicio" | "final";
@@ -109,6 +113,60 @@ const CATEGORIA_STYLES: Record<string, { badge: string; pill: string; label: str
     dot: "bg-teal-500",
   },
 };
+
+function CategoriaSelector({
+  value,
+  onChange,
+  className,
+}: {
+  value: string;
+  onChange: (val: string | null) => void;
+  className?: string;
+}) {
+  return (
+    <Select
+      value={value || "none"}
+      onValueChange={(val) => onChange(val === "none" ? null : val)}
+    >
+      <SelectTrigger
+        className={`h-7.5 text-xs font-semibold border bg-background/80 hover:bg-muted/50 cursor-pointer ${
+          className || "w-[125px]"
+        }`}
+      >
+        <SelectValue placeholder="Sem categoria">
+          {value ? (
+            <span className="flex items-center gap-1.5 font-bold truncate">
+              <span
+                className={`h-2 w-2 rounded-full shrink-0 ${
+                  CATEGORIA_STYLES[value]?.dot || "bg-muted-foreground"
+                }`}
+              />
+              <span>{value}</span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground font-normal truncate">Sem categoria</span>
+          )}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none" className="text-xs text-muted-foreground cursor-pointer">
+          — Sem Categoria
+        </SelectItem>
+        {ATENDIMENTO_CATEGORIAS.map((cat) => {
+          const style = CATEGORIA_STYLES[cat];
+          return (
+            <SelectItem key={cat} value={cat} className="text-xs font-medium cursor-pointer">
+              <span className="flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full ${style.dot}`} />
+                <span className="font-bold">{cat}</span>
+              </span>
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
+  );
+}
 
 function cleanPhoneForWhatsApp(phone: string): string {
   const digits = phone.replace(/\D/g, "");
@@ -190,8 +248,8 @@ function AtendimentosPage() {
     },
   });
 
-  // 3. Busca a atribuição de categorias exclusivas dos atendimentos (EU, EU-NOC, IR, REM)
-  const { data: clientCategories = {} } = useQuery<CategoriasClientesMap>({
+  // 3. Busca a atribuição de categorias exclusivas dos atendimentos (EU, EU-NOC, IR, REM) por tipo (inicio / final)
+  const { data: clientCategories = { inicio: {}, final: {} } } = useQuery<CategoriasPorTipo>({
     queryKey: ["atendimentos_categorias_clientes"],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -201,12 +259,24 @@ function AtendimentosPage() {
         .maybeSingle();
 
       if (error) throw error;
-      if (!data?.value) return {};
+      if (!data?.value) return { inicio: {}, final: {} };
 
       try {
-        return JSON.parse(data.value) as CategoriasClientesMap;
+        const parsed = JSON.parse(data.value);
+        if (parsed.inicio || parsed.final) {
+          return {
+            inicio: (parsed.inicio as CategoriasClientesMap) || {},
+            final: (parsed.final as CategoriasClientesMap) || {},
+          };
+        }
+        // Migração de formato legado: replica para inicio e final inicialmente
+        const legacy = parsed as CategoriasClientesMap;
+        return {
+          inicio: { ...legacy },
+          final: { ...legacy },
+        };
       } catch {
-        return {};
+        return { inicio: {}, final: {} };
       }
     },
   });
@@ -232,15 +302,27 @@ function AtendimentosPage() {
     },
   });
 
-  // Mutação para salvar a categoria de um cliente
+  // Mutação para salvar a categoria de um cliente para um tipo específico (inicio ou final)
   const setClientCategory = useMutation({
-    mutationFn: async ({ clienteId, categoria }: { clienteId: string; categoria: string | null }) => {
+    mutationFn: async ({
+      clienteId,
+      tipo,
+      categoria,
+    }: {
+      clienteId: string;
+      tipo: TipoAtendimento;
+      categoria: string | null;
+    }) => {
       const user_id = await currentUserId();
-      const updated: CategoriasClientesMap = { ...clientCategories };
+      const updated: CategoriasPorTipo = {
+        inicio: { ...clientCategories.inicio },
+        final: { ...clientCategories.final },
+      };
+
       if (categoria && categoria !== "none") {
-        updated[clienteId] = categoria;
+        updated[tipo][clienteId] = categoria;
       } else {
-        delete updated[clienteId];
+        delete updated[tipo][clienteId];
       }
 
       const { error } = await supabase.from("configuracoes").upsert(
@@ -254,15 +336,20 @@ function AtendimentosPage() {
       if (error) throw error;
       return updated;
     },
-    onMutate: async ({ clienteId, categoria }) => {
+    onMutate: async ({ clienteId, tipo, categoria }) => {
       await qc.cancelQueries({ queryKey: ["atendimentos_categorias_clientes"] });
-      const previous = qc.getQueryData<CategoriasClientesMap>(["atendimentos_categorias_clientes"]);
-      const updated: CategoriasClientesMap = { ...(previous || {}) };
+      const previous = qc.getQueryData<CategoriasPorTipo>(["atendimentos_categorias_clientes"]);
+      const updated: CategoriasPorTipo = {
+        inicio: { ...(previous?.inicio || {}) },
+        final: { ...(previous?.final || {}) },
+      };
+
       if (categoria && categoria !== "none") {
-        updated[clienteId] = categoria;
+        updated[tipo][clienteId] = categoria;
       } else {
-        delete updated[clienteId];
+        delete updated[tipo][clienteId];
       }
+
       qc.setQueryData(["atendimentos_categorias_clientes"], updated);
       return { previous };
     },
@@ -273,10 +360,11 @@ function AtendimentosPage() {
       toast.error(`Erro ao salvar categoria: ${err.message}`);
     },
     onSuccess: (_, vars) => {
+      const tipoLabel = vars.tipo === "inicio" ? "Início" : "Final";
       toast.success(
         vars.categoria && vars.categoria !== "none"
-          ? `Categoria "${vars.categoria}" atribuída`
-          : "Categoria removida"
+          ? `Categoria "${vars.categoria}" (${tipoLabel}) atribuída`
+          : `Categoria de ${tipoLabel} removida`
       );
       qc.invalidateQueries({ queryKey: ["atendimentos_categorias_clientes"] });
     },
@@ -525,7 +613,7 @@ function AtendimentosPage() {
     toast.info(`Atendimentos de ${formatMonthLabel(selectedMonth)} foram resetados.`);
   };
 
-  // Contagem por categoria
+  // Contagem por categoria (com base no tipo selecionado)
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {
       todas: clientes.length,
@@ -537,16 +625,34 @@ function AtendimentosPage() {
     };
 
     clientes.forEach((c) => {
-      const cat = clientCategories[c.id];
-      if (cat && counts[cat] !== undefined) {
-        counts[cat]++;
+      const catInicio = clientCategories.inicio[c.id];
+      const catFinal = clientCategories.final[c.id];
+
+      if (tipoFilter === "inicio") {
+        if (catInicio && counts[catInicio] !== undefined) {
+          counts[catInicio]++;
+        } else {
+          counts.sem_categoria++;
+        }
+      } else if (tipoFilter === "final") {
+        if (catFinal && counts[catFinal] !== undefined) {
+          counts[catFinal]++;
+        } else {
+          counts.sem_categoria++;
+        }
       } else {
-        counts.sem_categoria++;
+        // Modo "ambos": se tem categoria em qualquer um dos dois ciclos
+        const cat = catInicio || catFinal;
+        if (cat && counts[cat] !== undefined) {
+          counts[cat]++;
+        } else {
+          counts.sem_categoria++;
+        }
       }
     });
 
     return counts;
-  }, [clientes, clientCategories]);
+  }, [clientes, clientCategories, tipoFilter]);
 
   // Estatísticas completas do mês
   const stats = useMemo(() => {
@@ -599,15 +705,20 @@ function AtendimentosPage() {
   // Filtros aplicados (Busca + Tipo de Atendimento + Status + Categoria)
   const filteredClientes = useMemo(() => {
     return clientes.filter((c) => {
-      const clientCat = clientCategories[c.id] || "";
+      const catInicio = clientCategories.inicio[c.id] || "";
+      const catFinal = clientCategories.final[c.id] || "";
       const remoteId = remoteAccessIds[c.id] || "";
 
       // 1. Filtro de Categoria
       if (categoryFilter !== "todas") {
         if (categoryFilter === "sem_categoria") {
-          if (clientCat) return false;
-        } else if (clientCat !== categoryFilter) {
-          return false;
+          if (tipoFilter === "inicio" && catInicio) return false;
+          if (tipoFilter === "final" && catFinal) return false;
+          if (tipoFilter === "ambos" && (catInicio || catFinal)) return false;
+        } else {
+          if (tipoFilter === "inicio" && catInicio !== categoryFilter) return false;
+          if (tipoFilter === "final" && catFinal !== categoryFilter) return false;
+          if (tipoFilter === "ambos" && catInicio !== categoryFilter && catFinal !== categoryFilter) return false;
         }
       }
 
@@ -623,7 +734,9 @@ function AtendimentosPage() {
         " " +
         (c.observacoes ?? "") +
         " " +
-        clientCat +
+        catInicio +
+        " " +
+        catFinal +
         " " +
         remoteId
       )
@@ -655,7 +768,8 @@ function AtendimentosPage() {
   const exportCSV = () => {
     const headers = [
       "Nome",
-      "Categoria Atendimento",
+      "Categoria (Início)",
+      "Categoria (Final)",
       "ID Acesso Remoto",
       "Telefone",
       "Email",
@@ -672,7 +786,8 @@ function AtendimentosPage() {
     const rows = filteredClientes.map((c) => {
       const atInicio = atendimentosData.inicio[c.id];
       const atFinal = atendimentosData.final[c.id];
-      const cat = clientCategories[c.id] || "Sem Categoria";
+      const catInicio = clientCategories.inicio[c.id] || "Sem Categoria";
+      const catFinal = clientCategories.final[c.id] || "Sem Categoria";
       const remoteId = remoteAccessIds[c.id] || "";
 
       const inicioStatus = atInicio?.atendido ? "SIM" : "NÃO";
@@ -694,7 +809,8 @@ function AtendimentosPage() {
 
       return [
         `"${c.nome.replace(/"/g, '""')}"`,
-        `"${cat}"`,
+        `"${catInicio}"`,
+        `"${catFinal}"`,
         `"${remoteId.replace(/"/g, '""')}"`,
         `"${c.telefone}"`,
         `"${c.email ?? ""}"`,
@@ -937,7 +1053,11 @@ function AtendimentosPage() {
               <div className="flex items-center gap-2">
                 <Tag className="h-4 w-4 text-primary shrink-0" />
                 <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  Filtrar por Categoria:
+                  {tipoFilter === "inicio"
+                    ? "Filtrar por Categoria (Início):"
+                    : tipoFilter === "final"
+                    ? "Filtrar por Categoria (Final):"
+                    : "Filtrar por Categoria (Início ou Final):"}
                 </span>
               </div>
 
@@ -1130,7 +1250,24 @@ function AtendimentosPage() {
                   <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
                     <tr>
                       <th className="text-left px-4 py-3 min-w-[200px]">Cliente</th>
-                      <th className="text-left px-4 py-3 w-36">Categoria</th>
+
+                      {/* Header da Categoria independente */}
+                      {tipoFilter === "inicio" && (
+                        <th className="text-left px-4 py-3 w-36 bg-blue-500/5 text-blue-700 dark:text-blue-400">
+                          Cat. Início
+                        </th>
+                      )}
+                      {tipoFilter === "final" && (
+                        <th className="text-left px-4 py-3 w-36 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400">
+                          Cat. Final
+                        </th>
+                      )}
+                      {tipoFilter === "ambos" && (
+                        <th className="text-left px-4 py-3 min-w-[190px]">
+                          Categorias (Início / Final)
+                        </th>
+                      )}
+
                       <th className="text-left px-4 py-3 min-w-[170px]">ID Acesso Remoto</th>
                       <th className="text-left px-4 py-3 min-w-[160px]">Telefone (WhatsApp)</th>
 
@@ -1197,7 +1334,8 @@ function AtendimentosPage() {
                           })
                         : null;
 
-                      const clientCat = clientCategories[c.id] || "";
+                      const catInicio = clientCategories.inicio[c.id] || "";
+                      const catFinal = clientCategories.final[c.id] || "";
                       const remoteId = remoteAccessIds[c.id] || "";
 
                       return (
@@ -1227,51 +1365,75 @@ function AtendimentosPage() {
                             </div>
                           </td>
 
-                          {/* Categoria */}
-                          <td className="px-4 py-3.5">
-                            <Select
-                              value={clientCat || "none"}
-                              onValueChange={(val) =>
-                                setClientCategory.mutate({
-                                  clienteId: c.id,
-                                  categoria: val === "none" ? null : val,
-                                })
-                              }
-                            >
-                              <SelectTrigger className="h-8 text-xs font-semibold border bg-background/80 hover:bg-muted/50 w-[125px]">
-                                <SelectValue placeholder="Sem categoria">
-                                  {clientCat ? (
-                                    <span className="flex items-center gap-1.5 font-bold">
-                                      <span
-                                        className={`h-2 w-2 rounded-full ${
-                                          CATEGORIA_STYLES[clientCat]?.dot || "bg-muted-foreground"
-                                        }`}
-                                      />
-                                      <span>{clientCat}</span>
-                                    </span>
-                                  ) : (
-                                    <span className="text-muted-foreground font-normal">Sem categoria</span>
-                                  )}
-                                </SelectValue>
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="none" className="text-xs text-muted-foreground">
-                                  — Sem Categoria
-                                </SelectItem>
-                                {ATENDIMENTO_CATEGORIAS.map((cat) => {
-                                  const style = CATEGORIA_STYLES[cat];
-                                  return (
-                                    <SelectItem key={cat} value={cat} className="text-xs font-medium">
-                                      <span className="flex items-center gap-2">
-                                        <span className={`h-2 w-2 rounded-full ${style.dot}`} />
-                                        <span className="font-bold">{cat}</span>
-                                      </span>
-                                    </SelectItem>
-                                  );
-                                })}
-                              </SelectContent>
-                            </Select>
-                          </td>
+                          {/* Categoria Independente */}
+                          {tipoFilter === "inicio" && (
+                            <td className="px-4 py-3.5 bg-blue-500/[0.02]">
+                              <CategoriaSelector
+                                value={catInicio}
+                                onChange={(val) =>
+                                  setClientCategory.mutate({
+                                    clienteId: c.id,
+                                    tipo: "inicio",
+                                    categoria: val,
+                                  })
+                                }
+                              />
+                            </td>
+                          )}
+
+                          {tipoFilter === "final" && (
+                            <td className="px-4 py-3.5 bg-emerald-500/[0.02]">
+                              <CategoriaSelector
+                                value={catFinal}
+                                onChange={(val) =>
+                                  setClientCategory.mutate({
+                                    clienteId: c.id,
+                                    tipo: "final",
+                                    categoria: val,
+                                  })
+                                }
+                              />
+                            </td>
+                          )}
+
+                          {tipoFilter === "ambos" && (
+                            <td className="px-4 py-3.5">
+                              <div className="flex flex-col gap-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-bold text-blue-700 dark:text-blue-400 w-11 shrink-0">
+                                    Início:
+                                  </span>
+                                  <CategoriaSelector
+                                    value={catInicio}
+                                    onChange={(val) =>
+                                      setClientCategory.mutate({
+                                        clienteId: c.id,
+                                        tipo: "inicio",
+                                        categoria: val,
+                                      })
+                                    }
+                                    className="w-[115px] h-7 text-[11px]"
+                                  />
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 w-11 shrink-0">
+                                    Final:
+                                  </span>
+                                  <CategoriaSelector
+                                    value={catFinal}
+                                    onChange={(val) =>
+                                      setClientCategory.mutate({
+                                        clienteId: c.id,
+                                        tipo: "final",
+                                        categoria: val,
+                                      })
+                                    }
+                                    className="w-[115px] h-7 text-[11px]"
+                                  />
+                                </div>
+                              </div>
+                            </td>
+                          )}
 
                           {/* ID Acesso Remoto */}
                           <td className="px-4 py-3.5">
