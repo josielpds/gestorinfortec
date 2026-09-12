@@ -77,31 +77,32 @@ function CobrancasPage() {
   const create = useMutation({
     mutationFn: async (p: any) => {
       const user_id = await currentUserId();
-      if (p.recorrente && p.gerar_antecipadas) {
-        const qtd = Math.max(1, Math.min(120, parseInt(p.recorrencia_qtd || "12", 10) || 12));
-        const freq = p.frequencia || "mensal";
-        const datasFuturas = gerarDatas(p.vencimento, freq, qtd - 1, p.recorrencia_fim || null);
-        const todasDatas = [p.vencimento, ...datasFuturas];
+      const { gerar_antecipadas, recorrencia_qtd, clientes, categorias, ...payload } = p;
+      if (payload.recorrente && gerar_antecipadas) {
+        const qtd = Math.max(1, Math.min(120, parseInt(recorrencia_qtd || "12", 10) || 12));
+        const freq = payload.frequencia || "mensal";
+        const datasFuturas = gerarDatas(payload.vencimento, freq, qtd - 1, payload.recorrencia_fim || null);
+        const todasDatas = [payload.vencimento, ...datasFuturas];
 
         const rows = todasDatas.map((v, i) => ({
           user_id,
-          cliente_id: p.cliente_id,
-          descricao: p.descricao,
-          valor: p.valor,
+          cliente_id: payload.cliente_id,
+          descricao: payload.descricao,
+          valor: payload.valor,
           vencimento: v,
-          categoria_id: p.categoria_id || null,
-          observacoes: p.observacoes || null,
+          categoria_id: payload.categoria_id || null,
+          observacoes: payload.observacoes || null,
           status: "pendente",
           recorrente: i === 0, // marca a primeira como matriz recorrente
           frequencia: i === 0 ? freq : null,
-          recorrencia_fim: i === 0 ? p.recorrencia_fim || null : null,
+          recorrencia_fim: i === 0 ? payload.recorrencia_fim || null : null,
         }));
 
         const { error } = await supabase.from("cobrancas").insert(rows as any);
         if (error) throw error;
         return rows.length;
       } else {
-        const { error } = await supabase.from("cobrancas").insert({ ...p, user_id });
+        const { error } = await supabase.from("cobrancas").insert({ ...payload, user_id });
         if (error) throw error;
         return 1;
       }
@@ -262,7 +263,17 @@ function CobrancasPage() {
 
   const update = useMutation({
     mutationFn: async ({ id, ...p }: any) => {
-      const { error } = await supabase.from("cobrancas").update(p).eq("id", id);
+      const {
+        gerar_antecipadas,
+        recorrencia_qtd,
+        clientes,
+        categorias,
+        created_at,
+        updated_at,
+        id: _id,
+        ...payload
+      } = p;
+      const { error } = await supabase.from("cobrancas").update(payload).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => { toast.success("Cobrança atualizada"); qc.invalidateQueries(); setEditing(null); },
