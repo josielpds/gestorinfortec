@@ -1,5 +1,5 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Users, Receipt, MessageCircle, BarChart3, Settings, Zap, Wallet, FileMinus, LogOut, ShieldCheck, Lock, Menu, UserCheck } from "lucide-react";
+import { LayoutDashboard, Users, Receipt, MessageCircle, BarChart3, Settings, Zap, Wallet, FileMinus, LogOut, ShieldCheck, Lock, Menu, UserCheck, Calculator } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -17,6 +17,7 @@ const nav = [
   { to: "/cobrancas", label: "Contas a Receber", icon: Receipt },
   { to: "/contas-a-pagar", label: "Contas a Pagar", icon: FileMinus },
   { to: "/movimentacoes", label: "Entradas e Saídas", icon: Wallet },
+  { to: "/faturamento-fiscal", label: "Faturamento Fiscal", icon: Calculator },
   { to: "/mensagens", label: "Disparar Mensagens", icon: MessageCircle },
   { to: "/relatorios", label: "Relatórios", icon: BarChart3 },
   { to: "/atendimentos", label: "Atendimentos", icon: UserCheck },
