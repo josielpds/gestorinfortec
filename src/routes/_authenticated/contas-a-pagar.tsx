@@ -19,9 +19,9 @@ import { currentUserId } from "@/hooks/useCurrentUser";
 
 export const Route = createFileRoute("/_authenticated/contas-a-pagar")({
   head: () => ({ meta: [
-    { title: "Contas a Pagar — CobraZap" },
+    { title: "Contas a Pagar — Gestor Financeiro Infortec" },
     { name: "description", content: "Cadastre e controle as contas a pagar do seu negócio, com vencimentos e baixa automática nas saídas." },
-    { property: "og:title", content: "Contas a Pagar — CobraZap" },
+    { property: "og:title", content: "Contas a Pagar — Gestor Financeiro Infortec" },
     { property: "og:description", content: "Controle vencimentos, fornecedores e pagamentos das suas despesas." },
   ] }),
   component: ContasPagarPage,

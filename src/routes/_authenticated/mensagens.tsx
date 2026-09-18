@@ -13,7 +13,7 @@ import { brl, fmtDate, effectiveStatus, todayISO, daysBetween } from "@/lib/form
 import { waLink, renderTemplate } from "@/lib/whatsapp";
 
 export const Route = createFileRoute("/_authenticated/mensagens")({
-  head: () => ({ meta: [{ title: "Disparar Mensagens — CobraZap" }, { name: "description", content: "Envie cobranças e lembretes via WhatsApp no vencimento e pós-vencimento (5 e 7 dias)." }] }),
+  head: () => ({ meta: [{ title: "Disparar Mensagens — Gestor Financeiro Infortec" }, { name: "description", content: "Envie cobranças e lembretes via WhatsApp no vencimento e pós-vencimento (5 e 7 dias)." }] }),
   component: MensagensPage,
 });
 

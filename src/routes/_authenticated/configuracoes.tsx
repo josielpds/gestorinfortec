@@ -19,7 +19,7 @@ import { Download, UploadCloud, KeyRound, CheckCircle2, AlertTriangle, FileJson,
 export const Route = createFileRoute("/_authenticated/configuracoes")({
   head: () => ({
     meta: [
-      { title: "Configurações — CobraZap" },
+      { title: "Configurações — Gestor Financeiro Infortec" },
       { name: "description", content: "Configure seu perfil, templates de mensagem e dados da empresa." },
     ],
   }),

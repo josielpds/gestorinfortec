@@ -23,7 +23,7 @@ import {
 
 export const Route = createFileRoute("/_authenticated/relatorios")({
   head: () => ({ meta: [
-    { title: "Relatórios — CobraZap" },
+    { title: "Relatórios — Gestor Financeiro Infortec" },
     { name: "description", content: "DRE, faturamento, movimentações financeiras, cadastros, clientes com cobranças ativas e inadimplência." },
   ] }),
   component: RelatoriosPage,

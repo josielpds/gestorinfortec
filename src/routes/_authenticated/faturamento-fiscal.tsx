@@ -45,7 +45,7 @@ import {
 export const Route = createFileRoute("/_authenticated/faturamento-fiscal")({
   head: () => ({
     meta: [
-      { title: "Faturamento Fiscal — CobraZap" },
+      { title: "Faturamento Fiscal — Gestor Financeiro Infortec" },
       {
         name: "description",
         content: "Controle e acompanhamento de faturamento fiscal anual para Conta CNPJ e Conta CPF com limites.",

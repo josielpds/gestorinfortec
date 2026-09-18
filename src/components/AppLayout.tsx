@@ -72,13 +72,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="md:hidden sticky top-0 z-40 flex items-center justify-between gap-3 bg-sidebar text-sidebar-foreground px-4 h-14 border-b border-sidebar-border">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center text-primary-foreground shrink-0">
-            <Zap className="h-4 w-4" fill="currentColor" />
-          </div>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <img
+            src="/logo.png"
+            alt="Gestor Financeiro Infortec"
+            className="h-8 w-8 rounded-lg object-cover shadow-sm shrink-0 ring-1 ring-border/20"
+          />
           <div className="min-w-0">
-            <div className="font-bold leading-tight truncate">CobraZap</div>
-            <div className="text-[10px] opacity-70 leading-tight truncate">Cobranças via WhatsApp</div>
+            <div className="font-bold text-xs sm:text-sm leading-tight truncate">Gestor Financeiro Infortec</div>
+            <div className="text-[10px] opacity-70 leading-tight truncate">Gestão e Cobranças via WhatsApp</div>
           </div>
         </div>
         <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
@@ -115,13 +117,15 @@ function SidebarContent({
 
   return (
     <>
-      <div className="px-5 py-6 flex items-center gap-3 border-b border-sidebar-border">
-        <div className="h-10 w-10 rounded-xl bg-primary flex items-center justify-center text-primary-foreground">
-          <Zap className="h-5 w-5" fill="currentColor" />
-        </div>
-        <div>
-          <div className="font-bold text-lg leading-tight">CobraZap</div>
-          <div className="text-xs opacity-70 leading-tight">Cobranças via WhatsApp</div>
+      <div className="px-4 py-5 flex items-center gap-3 border-b border-sidebar-border">
+        <img
+          src="/logo.png"
+          alt="Gestor Financeiro Infortec"
+          className="h-10 w-10 rounded-xl object-cover shadow-sm shrink-0 ring-1 ring-border/20"
+        />
+        <div className="min-w-0">
+          <div className="font-bold text-sm leading-tight truncate">Gestor Financeiro Infortec</div>
+          <div className="text-[11px] opacity-70 leading-tight truncate">Gestão e Cobranças via WhatsApp</div>
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">

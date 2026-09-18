@@ -43,7 +43,7 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/_authenticated/atendimentos")({
   head: () => ({
     meta: [
-      { title: "Atendimentos — CobraZap" },
+      { title: "Atendimentos — Gestor Financeiro Infortec" },
       { name: "description", content: "Controle de atendimentos mensais: Relatórios de Início e Verificação de Final de Mês." },
     ],
   }),

@@ -15,8 +15,8 @@ export const Route = createFileRoute("/auth")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Entrar — CobraZap" },
-      { name: "description", content: "Acesse sua conta CobraZap para gerenciar cobranças pelo WhatsApp." },
+      { title: "Entrar — Gestor Financeiro Infortec" },
+      { name: "description", content: "Acesse sua conta Gestor Financeiro Infortec para gerenciar cobranças e finanças pelo WhatsApp." },
     ],
   }),
   component: AuthPage,
@@ -44,10 +44,15 @@ function AuthPage() {
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <Link to="/" className="flex items-center justify-center gap-3 mb-8">
-          <div className="h-11 w-11 rounded-xl bg-primary flex items-center justify-center text-primary-foreground">
-            <Zap className="h-5 w-5" fill="currentColor" />
+          <img
+            src="/logo.png"
+            alt="Gestor Financeiro Infortec"
+            className="h-12 w-12 rounded-xl object-cover shadow-md ring-1 ring-border/20"
+          />
+          <div className="text-left">
+            <div className="font-bold text-xl leading-tight">Gestor Financeiro Infortec</div>
+            <div className="text-xs text-muted-foreground">Gestão e Cobranças via WhatsApp</div>
           </div>
-          <div className="font-bold text-xl">CobraZap</div>
         </Link>
 
         <Card>

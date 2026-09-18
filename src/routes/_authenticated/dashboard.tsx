@@ -14,7 +14,7 @@ import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGri
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
     meta: [
-      { title: "Dashboard — CobraZap" },
+      { title: "Dashboard — Gestor Financeiro Infortec" },
       { name: "description", content: "Visão geral das cobranças, contas a pagar, recebimentos e clientes." },
     ],
   }),

@@ -8,10 +8,10 @@ export const Route = createFileRoute("/")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "CobraZap — Cobranças automáticas via WhatsApp" },
-      { name: "description", content: "Gerencie clientes, cobranças e recebimentos. Dispare lembretes pelo WhatsApp em um clique." },
-      { property: "og:title", content: "CobraZap — Cobranças automáticas via WhatsApp" },
-      { property: "og:description", content: "Gerencie clientes, cobranças e recebimentos. Dispare lembretes pelo WhatsApp em um clique." },
+      { title: "Gestor Financeiro Infortec — Gestão e Cobranças via WhatsApp" },
+      { name: "description", content: "Gerencie clientes, cobranças, fluxo de caixa e relatórios financeiros. Dispare lembretes pelo WhatsApp em um clique." },
+      { property: "og:title", content: "Gestor Financeiro Infortec — Gestão e Cobranças via WhatsApp" },
+      { property: "og:description", content: "Gerencie clientes, cobranças, fluxo de caixa e relatórios financeiros. Dispare lembretes pelo WhatsApp em um clique." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -31,10 +31,15 @@ function Landing() {
     <div className="min-h-screen bg-background">
       <header className="max-w-6xl mx-auto flex items-center justify-between px-6 py-5">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-primary flex items-center justify-center text-primary-foreground">
-            <Zap className="h-5 w-5" fill="currentColor" />
+          <img
+            src="/logo.png"
+            alt="Gestor Financeiro Infortec"
+            className="h-10 w-10 rounded-xl object-cover shadow-sm ring-1 ring-border/20"
+          />
+          <div>
+            <div className="font-bold text-lg leading-tight">Gestor Financeiro Infortec</div>
+            <div className="text-xs text-muted-foreground leading-tight">Gestão e Cobranças via WhatsApp</div>
           </div>
-          <div className="font-bold text-lg">CobraZap</div>
         </div>
         <Link to="/auth"><Button>Entrar</Button></Link>
       </header>

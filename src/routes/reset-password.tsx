@@ -12,10 +12,10 @@ export const Route = createFileRoute("/reset-password")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Redefinir senha — CobraZap" },
-      { name: "description", content: "Crie uma nova senha para acessar sua conta CobraZap." },
-      { property: "og:title", content: "Redefinir senha — CobraZap" },
-      { property: "og:description", content: "Crie uma nova senha para acessar sua conta CobraZap." },
+      { title: "Redefinir senha — Gestor Financeiro Infortec" },
+      { name: "description", content: "Crie uma nova senha para acessar sua conta Gestor Financeiro Infortec." },
+      { property: "og:title", content: "Redefinir senha — Gestor Financeiro Infortec" },
+      { property: "og:description", content: "Crie uma nova senha para acessar sua conta Gestor Financeiro Infortec." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
@@ -59,10 +59,15 @@ function ResetPasswordPage() {
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="w-full max-w-md">
         <Link to="/" className="flex items-center justify-center gap-3 mb-8">
-          <div className="h-11 w-11 rounded-xl bg-primary flex items-center justify-center text-primary-foreground">
-            <Zap className="h-5 w-5" fill="currentColor" />
+          <img
+            src="/logo.png"
+            alt="Gestor Financeiro Infortec"
+            className="h-12 w-12 rounded-xl object-cover shadow-md ring-1 ring-border/20"
+          />
+          <div className="text-left">
+            <div className="font-bold text-xl leading-tight">Gestor Financeiro Infortec</div>
+            <div className="text-xs text-muted-foreground">Gestão e Cobranças via WhatsApp</div>
           </div>
-          <div className="font-bold text-xl">CobraZap</div>
         </Link>
 
         <Card>

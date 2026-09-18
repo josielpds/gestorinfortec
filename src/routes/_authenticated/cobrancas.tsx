@@ -22,7 +22,7 @@ import { BulkImportDialog } from "@/components/BulkImportDialog";
 import { parseDelimited, parseValor, parseDate, norm } from "@/lib/import";
 
 export const Route = createFileRoute("/_authenticated/cobrancas")({
-  head: () => ({ meta: [{ title: "Contas a Receber — CobraZap" }, { name: "description", content: "Cadastro e gestão das contas a receber dos seus clientes." }] }),
+  head: () => ({ meta: [{ title: "Contas a Receber — Gestor Financeiro Infortec" }, { name: "description", content: "Cadastro e gestão das contas a receber dos seus clientes." }] }),
   component: CobrancasPage,
 });
 

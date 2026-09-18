@@ -26,7 +26,7 @@ export async function baixarBackupCompleto() {
   }
 
   const payload = {
-    app: "CobraZap",
+    app: "Gestor Financeiro Infortec",
     versao: 1,
     gerado_em: new Date().toISOString(),
     dados,
@@ -36,7 +36,7 @@ export async function baixarBackupCompleto() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `cobrazap-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `gestor-financeiro-infortec-backup-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
 

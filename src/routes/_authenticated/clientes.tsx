@@ -16,7 +16,7 @@ import { toast } from "sonner";
 import { BulkImportDialog } from "@/components/BulkImportDialog";
 
 export const Route = createFileRoute("/_authenticated/clientes")({
-  head: () => ({ meta: [{ title: "Clientes — CobraZap" }, { name: "description", content: "Cadastro e gestão de clientes." }] }),
+  head: () => ({ meta: [{ title: "Clientes — Gestor Financeiro Infortec" }, { name: "description", content: "Cadastro e gestão de clientes." }] }),
   component: ClientesPage,
 });
 

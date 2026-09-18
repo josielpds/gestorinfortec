@@ -20,7 +20,7 @@ import { currentUserId } from "@/hooks/useCurrentUser";
 export const Route = createFileRoute("/_authenticated/movimentacoes")({
   head: () => ({
     meta: [
-      { title: "Entradas e Saídas — CobraZap" },
+      { title: "Entradas e Saídas — Gestor Financeiro Infortec" },
       { name: "description", content: "Lance entradas e despesas manualmente e acompanhe seu saldo." },
     ],
   }),

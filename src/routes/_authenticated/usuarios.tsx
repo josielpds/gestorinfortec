@@ -22,10 +22,10 @@ import { useIsMaster } from "@/hooks/useAdmin";
 export const Route = createFileRoute("/_authenticated/usuarios")({
   head: () => ({
     meta: [
-      { title: "Usuários — CobraZap" },
+      { title: "Usuários — Gestor Financeiro Infortec" },
       {
         name: "description",
-        content: "Painel master: gerencie assinaturas, papéis e bloqueio dos usuários do CobraZap.",
+        content: "Painel master: gerencie assinaturas, papéis e bloqueio dos usuários do Gestor Financeiro Infortec.",
       },
     ],
   }),
