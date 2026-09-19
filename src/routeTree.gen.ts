@@ -17,6 +17,7 @@ import { Route as AuthenticatedUsuariosRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedRelatoriosRouteImport } from './routes/_authenticated/relatorios'
 import { Route as AuthenticatedMovimentacoesRouteImport } from './routes/_authenticated/movimentacoes'
 import { Route as AuthenticatedMensagensRouteImport } from './routes/_authenticated/mensagens'
+import { Route as AuthenticatedFaturamentoGeralRouteImport } from './routes/_authenticated/faturamento-geral'
 import { Route as AuthenticatedFaturamentoFiscalRouteImport } from './routes/_authenticated/faturamento-fiscal'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedContasAPagarRouteImport } from './routes/_authenticated/contas-a-pagar'
@@ -66,6 +67,12 @@ const AuthenticatedMensagensRoute = AuthenticatedMensagensRouteImport.update({
   path: '/mensagens',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedFaturamentoGeralRoute =
+  AuthenticatedFaturamentoGeralRouteImport.update({
+    id: '/faturamento-geral',
+    path: '/faturamento-geral',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedFaturamentoFiscalRoute =
   AuthenticatedFaturamentoFiscalRouteImport.update({
     id: '/faturamento-fiscal',
@@ -123,6 +130,7 @@ export interface FileRoutesByFullPath {
   '/contas-a-pagar': typeof AuthenticatedContasAPagarRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/faturamento-fiscal': typeof AuthenticatedFaturamentoFiscalRoute
+  '/faturamento-geral': typeof AuthenticatedFaturamentoGeralRoute
   '/mensagens': typeof AuthenticatedMensagensRoute
   '/movimentacoes': typeof AuthenticatedMovimentacoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
@@ -140,6 +148,7 @@ export interface FileRoutesByTo {
   '/contas-a-pagar': typeof AuthenticatedContasAPagarRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/faturamento-fiscal': typeof AuthenticatedFaturamentoFiscalRoute
+  '/faturamento-geral': typeof AuthenticatedFaturamentoGeralRoute
   '/mensagens': typeof AuthenticatedMensagensRoute
   '/movimentacoes': typeof AuthenticatedMovimentacoesRoute
   '/relatorios': typeof AuthenticatedRelatoriosRoute
@@ -159,6 +168,7 @@ export interface FileRoutesById {
   '/_authenticated/contas-a-pagar': typeof AuthenticatedContasAPagarRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/faturamento-fiscal': typeof AuthenticatedFaturamentoFiscalRoute
+  '/_authenticated/faturamento-geral': typeof AuthenticatedFaturamentoGeralRoute
   '/_authenticated/mensagens': typeof AuthenticatedMensagensRoute
   '/_authenticated/movimentacoes': typeof AuthenticatedMovimentacoesRoute
   '/_authenticated/relatorios': typeof AuthenticatedRelatoriosRoute
@@ -178,6 +188,7 @@ export interface FileRouteTypes {
     | '/contas-a-pagar'
     | '/dashboard'
     | '/faturamento-fiscal'
+    | '/faturamento-geral'
     | '/mensagens'
     | '/movimentacoes'
     | '/relatorios'
@@ -195,6 +206,7 @@ export interface FileRouteTypes {
     | '/contas-a-pagar'
     | '/dashboard'
     | '/faturamento-fiscal'
+    | '/faturamento-geral'
     | '/mensagens'
     | '/movimentacoes'
     | '/relatorios'
@@ -213,6 +225,7 @@ export interface FileRouteTypes {
     | '/_authenticated/contas-a-pagar'
     | '/_authenticated/dashboard'
     | '/_authenticated/faturamento-fiscal'
+    | '/_authenticated/faturamento-geral'
     | '/_authenticated/mensagens'
     | '/_authenticated/movimentacoes'
     | '/_authenticated/relatorios'
@@ -284,6 +297,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedMensagensRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/faturamento-geral': {
+      id: '/_authenticated/faturamento-geral'
+      path: '/faturamento-geral'
+      fullPath: '/faturamento-geral'
+      preLoaderRoute: typeof AuthenticatedFaturamentoGeralRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/faturamento-fiscal': {
       id: '/_authenticated/faturamento-fiscal'
       path: '/faturamento-fiscal'
@@ -352,6 +372,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedContasAPagarRoute: typeof AuthenticatedContasAPagarRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedFaturamentoFiscalRoute: typeof AuthenticatedFaturamentoFiscalRoute
+  AuthenticatedFaturamentoGeralRoute: typeof AuthenticatedFaturamentoGeralRoute
   AuthenticatedMensagensRoute: typeof AuthenticatedMensagensRoute
   AuthenticatedMovimentacoesRoute: typeof AuthenticatedMovimentacoesRoute
   AuthenticatedRelatoriosRoute: typeof AuthenticatedRelatoriosRoute
@@ -367,6 +388,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedContasAPagarRoute: AuthenticatedContasAPagarRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedFaturamentoFiscalRoute: AuthenticatedFaturamentoFiscalRoute,
+  AuthenticatedFaturamentoGeralRoute: AuthenticatedFaturamentoGeralRoute,
   AuthenticatedMensagensRoute: AuthenticatedMensagensRoute,
   AuthenticatedMovimentacoesRoute: AuthenticatedMovimentacoesRoute,
   AuthenticatedRelatoriosRoute: AuthenticatedRelatoriosRoute,
