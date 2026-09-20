@@ -144,6 +144,40 @@ function FaturamentoGeralPage() {
     },
   });
 
+  // 1.1 Fetch all saved faturamento_geral configurations for all years
+  const { data: allSavedConfigs = [] } = useQuery({
+    queryKey: ["todas_configuracoes_faturamento_geral"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("configuracoes")
+        .select("key, value")
+        .like("key", "faturamento_geral_%");
+
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  const mapSavedConfigs = useMemo(() => {
+    const map: Record<number, number> = {};
+    allSavedConfigs.forEach((item) => {
+      try {
+        const yStr = item.key.replace("faturamento_geral_", "");
+        const yNum = parseInt(yStr, 10);
+        if (yNum) {
+          const parsed = JSON.parse(item.value) as FaturamentoGeralData;
+          if (parsed.manualValues) {
+            const sum = Object.values(parsed.manualValues).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
+            if (sum > 0) map[yNum] = sum;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    });
+    return map;
+  }, [allSavedConfigs]);
+
   // 2. Query all cobrancas paid for the selected year and surrounding years
   const { data: cobrancasData = [] } = useQuery({
     queryKey: ["cobrancas_faturamento_geral"],
@@ -276,6 +310,7 @@ function FaturamentoGeralPage() {
     onSuccess: () => {
       toast.success(`Faturamento geral de ${ano} salvo com sucesso!`);
       qc.invalidateQueries({ queryKey: ["configuracao", configKey] });
+      qc.invalidateQueries({ queryKey: ["todas_configuracoes_faturamento_geral"] });
     },
     onError: (err: any) => {
       toast.error("Erro ao salvar: " + err.message);
@@ -330,6 +365,13 @@ function FaturamentoGeralPage() {
   const anosDisponiveis = useMemo(() => {
     const yearSet = new Set<number>([2021, 2022, 2023, 2024, 2025, currentYear, ano]);
 
+    // Anos presentes nas configurações salvas
+    allSavedConfigs.forEach((item) => {
+      const yStr = item.key.replace("faturamento_geral_", "");
+      const yNum = parseInt(yStr, 10);
+      if (yNum && yNum > 2000 && yNum < 2100) yearSet.add(yNum);
+    });
+
     cobrancasData.forEach((c) => {
       const d = c.data_pagamento || c.vencimento || c.created_at;
       if (d) {
@@ -346,9 +388,9 @@ function FaturamentoGeralPage() {
     });
 
     return Array.from(yearSet).sort((a, b) => a - b);
-  }, [cobrancasData, movimentacoesData, currentYear, ano]);
+  }, [cobrancasData, movimentacoesData, allSavedConfigs, currentYear, ano]);
 
-  // Year-over-year revenue comparison array (2021-2025 com dados históricos base + dados do sistema de 2025 em diante)
+  // Year-over-year revenue comparison array (alimentado dinamicamente pelos dados preenchidos / salvos / sistema)
   const dadosEvolucaoAnual = useMemo(() => {
     const result = anosDisponiveis.map((y) => {
       let totCob = 0;
@@ -374,16 +416,34 @@ function FaturamentoGeralPage() {
       let finalCob = totCob;
       let finalMov = totMov;
 
-      // Anos 2021 a 2024: usar valores históricos fornecidos
-      // Ano 2025: usar histórico base de 132.569,81 ou sistema se maior
-      // 2026 em diante: dados reais do sistema
-      if (y < 2025 && baseHistorica !== undefined) {
+      // 1. Se for o ano atualmente selecionado e preenchido na tela, usa o valor ativo em tempo real
+      if (y === ano) {
+        finalTotal = totalAno;
+        finalCob = totalCobrancasAno > 0 ? totalCobrancasAno : totalAno;
+        finalMov = totalMovimentacoesAno;
+      }
+      // 2. Se houver configuração salva para o ano 'y' no banco, usa os dados salvos
+      else if (mapSavedConfigs[y] !== undefined && mapSavedConfigs[y] > 0) {
+        finalTotal = mapSavedConfigs[y];
+        finalCob = mapSavedConfigs[y];
+        finalMov = 0;
+      }
+      // 3. Anos 2021 a 2024: valores históricos base fornecidos
+      else if (y < 2025 && baseHistorica !== undefined) {
         finalTotal = baseHistorica;
         finalCob = baseHistorica;
         finalMov = 0;
-      } else if (y === 2025 && baseHistorica !== undefined) {
+      }
+      // 4. Ano 2025: histórico base ou sistema se maior
+      else if (y === 2025 && baseHistorica !== undefined) {
         finalTotal = totalSistema > 0 ? totalSistema : baseHistorica;
         finalCob = totCob > 0 ? totCob : baseHistorica;
+        finalMov = totMov;
+      }
+      // 5. Demais anos: dados do sistema
+      else {
+        finalTotal = totalSistema;
+        finalCob = totCob;
         finalMov = totMov;
       }
 
@@ -406,7 +466,16 @@ function FaturamentoGeralPage() {
         crescimentoLabel: prev > 0 ? `${crescimento >= 0 ? "+" : ""}${crescimento.toFixed(1)}%` : "—",
       };
     });
-  }, [anosDisponiveis, cobrancasData, movimentacoesData]);
+  }, [
+    anosDisponiveis,
+    cobrancasData,
+    movimentacoesData,
+    ano,
+    totalAno,
+    totalCobrancasAno,
+    totalMovimentacoesAno,
+    mapSavedConfigs,
+  ]);
 
   // Previous year total for comparison card
   const totalAnoAnterior = useMemo(() => {
