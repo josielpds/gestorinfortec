@@ -86,6 +86,14 @@ const defaultMonthlyValues = (): MonthlyValues => ({
   dez: 0,
 });
 
+const HISTORICO_FATURAMENTO_BASE: Record<number, number> = {
+  2021: 67242.53,
+  2022: 81748.72,
+  2023: 103867.79,
+  2024: 117056.48,
+  2025: 132569.81,
+};
+
 interface FaturamentoGeralData {
   manualValues?: MonthlyValues;
   cobrancasValues?: MonthlyValues;
@@ -202,6 +210,25 @@ function FaturamentoGeralPage() {
       }
     });
 
+    // Se for ano histórico (2021..2025) e não houver lançamentos no banco de dados para esse ano,
+    // distribui o valor histórico igualmente nos 12 meses como sugestão inicial
+    const baseHist = HISTORICO_FATURAMENTO_BASE[ano];
+    const systemTotal = Object.values(totMap).reduce((a, b) => a + b, 0);
+    if (systemTotal === 0 && baseHist !== undefined) {
+      const perMonth = Math.round((baseHist / 12) * 100) / 100;
+      let remainder = baseHist;
+      MONTHS.forEach((m, idx) => {
+        if (idx === 11) {
+          totMap[m.key] = Math.round(remainder * 100) / 100;
+          cobMap[m.key] = Math.round(remainder * 100) / 100;
+        } else {
+          totMap[m.key] = perMonth;
+          cobMap[m.key] = perMonth;
+          remainder -= perMonth;
+        }
+      });
+    }
+
     return {
       cobrancasMes: cobMap,
       movimentacoesMes: movMap,
@@ -301,11 +328,7 @@ function FaturamentoGeralPage() {
 
   // 5. Multi-year data calculation for the Year-Over-Year Evolution Chart
   const anosDisponiveis = useMemo(() => {
-    const yearSet = new Set<number>();
-    yearSet.add(currentYear);
-    yearSet.add(currentYear - 1);
-    yearSet.add(currentYear - 2);
-    yearSet.add(ano);
+    const yearSet = new Set<number>([2021, 2022, 2023, 2024, 2025, currentYear, ano]);
 
     cobrancasData.forEach((c) => {
       const d = c.data_pagamento || c.vencimento || c.created_at;
@@ -325,7 +348,7 @@ function FaturamentoGeralPage() {
     return Array.from(yearSet).sort((a, b) => a - b);
   }, [cobrancasData, movimentacoesData, currentYear, ano]);
 
-  // Year-over-year revenue comparison array
+  // Year-over-year revenue comparison array (2021-2025 com dados históricos base + dados do sistema de 2025 em diante)
   const dadosEvolucaoAnual = useMemo(() => {
     const result = anosDisponiveis.map((y) => {
       let totCob = 0;
@@ -344,17 +367,36 @@ function FaturamentoGeralPage() {
         }
       });
 
-      const totalYear = totCob + totMov;
+      const totalSistema = totCob + totMov;
+      const baseHistorica = HISTORICO_FATURAMENTO_BASE[y];
+
+      let finalTotal = totalSistema;
+      let finalCob = totCob;
+      let finalMov = totMov;
+
+      // Anos 2021 a 2024: usar valores históricos fornecidos
+      // Ano 2025: usar histórico base de 132.569,81 ou sistema se maior
+      // 2026 em diante: dados reais do sistema
+      if (y < 2025 && baseHistorica !== undefined) {
+        finalTotal = baseHistorica;
+        finalCob = baseHistorica;
+        finalMov = 0;
+      } else if (y === 2025 && baseHistorica !== undefined) {
+        finalTotal = totalSistema > 0 ? totalSistema : baseHistorica;
+        finalCob = totCob > 0 ? totCob : baseHistorica;
+        finalMov = totMov;
+      }
+
       return {
         ano: String(y),
         anoNum: y,
-        Cobranças: totCob,
-        "Outras Entradas": totMov,
-        Total: totalYear,
+        Cobranças: finalCob,
+        "Outras Entradas": finalMov,
+        Total: finalTotal,
       };
     });
 
-    // Add growth percentages
+    // Adicionar percentuais de crescimento ano a ano
     return result.map((item, idx) => {
       const prev = idx > 0 ? result[idx - 1].Total : 0;
       const crescimento = prev > 0 ? ((item.Total - prev) / prev) * 100 : 0;
