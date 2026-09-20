@@ -38,6 +38,8 @@ import {
   Legend,
   Line,
   ComposedChart,
+  LabelList,
+  Cell,
 } from "recharts";
 
 export const Route = createFileRoute("/_authenticated/faturamento-geral")({
@@ -868,7 +870,7 @@ function FaturamentoGeralPage() {
             <CardContent className="pt-3">
               <div className="h-[300px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={dadosEvolucaoAnual} margin={{ top: 15, right: 15, left: 10, bottom: 0 }}>
+                  <ComposedChart data={dadosEvolucaoAnual} margin={{ top: 25, right: 15, left: 10, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
                     <XAxis dataKey="ano" tickLine={false} axisLine={false} />
                     <YAxis
@@ -878,7 +880,7 @@ function FaturamentoGeralPage() {
                       width={65}
                     />
                     <Tooltip
-                      formatter={(value: any, name: any) => [brl(Number(value)), name]}
+                      formatter={(value: any) => [brl(Number(value)), "Faturamento Total"]}
                       labelFormatter={(label) => `Ano ${label}`}
                       contentStyle={{
                         backgroundColor: "var(--card)",
@@ -888,28 +890,61 @@ function FaturamentoGeralPage() {
                       }}
                     />
                     <Legend verticalAlign="top" height={36} />
-                    <Bar dataKey="Cobranças" fill="#0284c7" radius={[4, 4, 0, 0]} name="Cobranças" stackId="a" />
-                    <Bar dataKey="Outras Entradas" fill="#38bdf8" radius={[4, 4, 0, 0]} name="Outras Entradas" stackId="a" />
-                  </BarChart>
+                    <Bar dataKey="Total" radius={[6, 6, 0, 0]} name="Total Faturado">
+                      {dadosEvolucaoAnual.map((entry) => (
+                        <Cell
+                          key={`cell-${entry.ano}`}
+                          fill={entry.anoNum === ano ? "#0284c7" : "#7dd3fc"}
+                        />
+                      ))}
+                      <LabelList
+                        dataKey="Total"
+                        position="top"
+                        formatter={(val: any) =>
+                          Number(val) > 0
+                            ? `R$ ${(Number(val) / 1000).toFixed(1)}k`
+                            : ""
+                        }
+                        className="text-[10px] font-bold fill-foreground"
+                      />
+                    </Bar>
+                    <Line
+                      type="monotone"
+                      dataKey="Total"
+                      stroke="#f59e0b"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, fill: "#f59e0b", strokeWidth: 1 }}
+                      name="Evolução Anual"
+                    />
+                  </ComposedChart>
                 </ResponsiveContainer>
               </div>
 
-              {/* Tabela de Crescimento Ano a Ano */}
+              {/* Todos os Anos - Cards de Evolução Clicáveis */}
               <div className="mt-4 pt-3 border-t border-border/60">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
-                  {dadosEvolucaoAnual.slice(-4).map((d) => (
-                    <div
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 text-center text-xs">
+                  {dadosEvolucaoAnual.map((d) => (
+                    <button
+                      type="button"
                       key={d.ano}
-                      className={`p-2 rounded-lg border ${
+                      onClick={() => setAno(d.anoNum)}
+                      className={`p-2 rounded-lg border text-left transition-all cursor-pointer hover:border-sky-500/60 ${
                         d.anoNum === ano
-                          ? "bg-sky-500/10 border-sky-500/40 font-bold"
-                          : "bg-muted/30 border-border/50"
+                          ? "bg-sky-500/15 border-sky-500 font-bold shadow-xs"
+                          : "bg-muted/30 border-border/50 hover:bg-muted/50"
                       }`}
                     >
-                      <div className="text-muted-foreground font-semibold">{d.ano}</div>
-                      <div className="font-extrabold text-foreground text-sm my-0.5">{brl(d.Total)}</div>
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground font-semibold">
+                        <span>{d.ano}</span>
+                        {d.anoNum === ano && (
+                          <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
+                        )}
+                      </div>
+                      <div className="font-extrabold text-foreground text-xs my-0.5 truncate">
+                        {brl(d.Total)}
+                      </div>
                       <div
-                        className={`text-[11px] font-bold ${
+                        className={`text-[10px] font-bold ${
                           d.crescimento > 0
                             ? "text-emerald-600 dark:text-emerald-400"
                             : d.crescimento < 0
@@ -919,7 +954,7 @@ function FaturamentoGeralPage() {
                       >
                         {d.crescimentoLabel}
                       </div>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
