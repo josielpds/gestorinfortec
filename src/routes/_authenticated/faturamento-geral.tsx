@@ -89,11 +89,11 @@ const defaultMonthlyValues = (): MonthlyValues => ({
 });
 
 const HISTORICO_FATURAMENTO_BASE: Record<number, number> = {
-  2021: 67242.53,
-  2022: 81748.72,
-  2023: 103867.79,
-  2024: 117056.48,
-  2025: 132569.81,
+  2021: 64721.95,
+  2022: 76731.63,
+  2023: 91452.43,
+  2024: 101147.25,
+  2025: 103699.35,
 };
 
 interface FaturamentoGeralData {
