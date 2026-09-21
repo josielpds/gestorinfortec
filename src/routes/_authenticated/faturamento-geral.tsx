@@ -97,11 +97,11 @@ const HISTORICO_FATURAMENTO_BASE: Record<number, number> = {
 };
 
 /**
- * Valores manuais fixos de Janeiro a Julho de 2025 (período anterior à operação no sistema):
+ * Valores manuais fixos de Janeiro a Julho de 2026 (período informado de histórico):
  * JAN: R$ 8.498,19 | FEV: R$ 9.323,98 | MAR: R$ 10.011,19 | ABR: R$ 9.864,88
  * MAI: R$ 9.525,19 | JUN: R$ 9.477,19 | JUL: R$ 10.193,19
  */
-const VALORES_BASE_2025_MANUAL: MonthlyValues = {
+const VALORES_BASE_2026_MANUAL: MonthlyValues = {
   jan: 8498.19,
   fev: 9323.98,
   mar: 10011.19,
@@ -118,13 +118,13 @@ const VALORES_BASE_2025_MANUAL: MonthlyValues = {
 
 /**
  * Regra de automação e bloqueio de inclusão manual:
- * - Anos posteriores a 2025 (2026, 2027, etc.): 100% dos meses (JAN a DEZ) sincronizados automaticamente e bloqueados para edição manual.
- * - Ano de 2025: Meses de AGO a DEZ sincronizados automaticamente com os dados do sistema e bloqueados para edição manual (JAN a JUL permitem ajuste manual de histórico).
- * - Anos anteriores a 2025: Históricos com suporte a edição manual.
+ * - Anos posteriores a 2026 (2027, 2028, etc.): 100% dos meses (JAN a DEZ) sincronizados automaticamente e bloqueados para edição manual.
+ * - Ano de 2026: Meses de AGO a DEZ sincronizados automaticamente com os dados do sistema e bloqueados para edição manual (JAN a JUL com os valores manuais informados).
+ * - Anos anteriores ou iguais a 2025: Históricos consolidados.
  */
 export function isMonthAutoLocked(year: number, monthKey: MonthKey): boolean {
-  if (year > 2025) return true;
-  if (year === 2025) {
+  if (year > 2026) return true;
+  if (year === 2026) {
     return ["ago", "set", "out", "nov", "dez"].includes(monthKey);
   }
   return false;
@@ -309,10 +309,10 @@ function FaturamentoGeralPage() {
   useEffect(() => {
     if (savedConfig?.manualValues) {
       const merged = { ...totalMesSistema, ...savedConfig.manualValues };
-      if (ano === 2025) {
+      if (ano === 2026) {
         MONTHS.forEach((m) => {
-          if (!isMonthAutoLocked(2025, m.key) && (merged[m.key] === undefined || merged[m.key] === 0)) {
-            merged[m.key] = VALORES_BASE_2025_MANUAL[m.key] || 0;
+          if (!isMonthAutoLocked(2026, m.key) && (merged[m.key] === undefined || merged[m.key] === 0)) {
+            merged[m.key] = VALORES_BASE_2026_MANUAL[m.key] || 0;
           }
         });
       }
@@ -323,16 +323,16 @@ function FaturamentoGeralPage() {
         }
       });
       setCustomValues(merged);
-      setIsManualEdit(ano <= 2025 && savedConfig.mode === "manual");
+      setIsManualEdit(ano <= 2026 && savedConfig.mode === "manual");
     } else {
-      if (ano === 2025) {
-        const initial2025 = { ...totalMesSistema, ...VALORES_BASE_2025_MANUAL };
+      if (ano === 2026) {
+        const initial2026 = { ...totalMesSistema, ...VALORES_BASE_2026_MANUAL };
         MONTHS.forEach((m) => {
-          if (isMonthAutoLocked(2025, m.key)) {
-            initial2025[m.key] = totalMesSistema[m.key];
+          if (isMonthAutoLocked(2026, m.key)) {
+            initial2026[m.key] = totalMesSistema[m.key];
           }
         });
-        setCustomValues(initial2025);
+        setCustomValues(initial2026);
       } else {
         setCustomValues(totalMesSistema);
       }
@@ -344,20 +344,20 @@ function FaturamentoGeralPage() {
     const result = defaultMonthlyValues();
     MONTHS.forEach((m) => {
       if (isMonthAutoLocked(ano, m.key)) {
-        // Meses de AGO a DEZ em 2025 e todos os meses em anos seguintes: sempre dados reais do sistema
+        // Meses de AGO a DEZ em 2026 e todos os meses em anos seguintes: sempre dados reais do sistema
         result[m.key] = totalMesSistema[m.key] || 0;
       } else {
-        // Meses manuais/históricos (ex: JAN a JUL 2025 ou anos anteriores)
-        const base2025 = ano === 2025 ? VALORES_BASE_2025_MANUAL[m.key] : undefined;
+        // Meses manuais/históricos (ex: JAN a JUL 2026 ou anos anteriores)
+        const base2026 = ano === 2026 ? VALORES_BASE_2026_MANUAL[m.key] : undefined;
         result[m.key] = isManualEdit
-          ? (customValues[m.key] ?? base2025 ?? totalMesSistema[m.key] ?? 0)
-          : (savedConfig?.manualValues?.[m.key] ?? customValues[m.key] ?? base2025 ?? totalMesSistema[m.key] ?? 0);
+          ? (customValues[m.key] ?? base2026 ?? totalMesSistema[m.key] ?? 0)
+          : (savedConfig?.manualValues?.[m.key] ?? customValues[m.key] ?? base2026 ?? totalMesSistema[m.key] ?? 0);
       }
     });
     return result;
   }, [ano, isManualEdit, customValues, totalMesSistema, savedConfig]);
 
-  // Save custom values mutation (usado para meses manuais de anos passados e Jan-Jul 2025)
+  // Save custom values mutation (usado para meses manuais de anos passados e Jan-Jul 2026)
   const saveMutation = useMutation({
     mutationFn: async (modeToSave: "automatic" | "manual" = isManualEdit ? "manual" : "automatic") => {
       const user_id = await currentUserId();
@@ -503,45 +503,45 @@ function FaturamentoGeralPage() {
         finalCob = totalCobrancasAno > 0 ? totalCobrancasAno : totalAno;
         finalMov = totalMovimentacoesAno;
       }
-      // 2. Anos > 2025 (2026, 2027, etc.): 100% dados reais do sistema
-      else if (y > 2025) {
+      // 2. Anos > 2026 (2027, 2028, etc.): 100% dados reais do sistema
+      else if (y > 2026) {
         finalTotal = totalSistema;
         finalCob = totCob;
         finalMov = totMov;
       }
-      // 3. Ano 2025: JAN a JUL de configuração salva (ou histórico base manual) + AGO a DEZ do sistema
-      else if (y === 2025) {
-        let sum2025 = 0;
-        let sumCob2025 = 0;
-        let sumMov2025 = 0;
+      // 3. Ano 2026: JAN a JUL de configuração salva (ou histórico base manual) + AGO a DEZ do sistema
+      else if (y === 2026) {
+        let sum2026 = 0;
+        let sumCob2026 = 0;
+        let sumMov2026 = 0;
 
         MONTHS.forEach((m, idx) => {
-          if (isMonthAutoLocked(2025, m.key)) {
+          if (isMonthAutoLocked(2026, m.key)) {
             // AGO a DEZ: sistema
             const sysM = (monthCobMap[idx] || 0) + (monthMovMap[idx] || 0);
-            sum2025 += sysM;
-            sumCob2025 += monthCobMap[idx] || 0;
-            sumMov2025 += monthMovMap[idx] || 0;
+            sum2026 += sysM;
+            sumCob2026 += monthCobMap[idx] || 0;
+            sumMov2026 += monthMovMap[idx] || 0;
           } else {
             // JAN a JUL: valor salvo ou valor da base manual informada
-            const manualVal = savedForYear?.[m.key] ?? VALORES_BASE_2025_MANUAL[m.key];
+            const manualVal = savedForYear?.[m.key] ?? VALORES_BASE_2026_MANUAL[m.key];
             if (manualVal !== undefined) {
-              sum2025 += Number(manualVal) || 0;
-              sumCob2025 += Number(manualVal) || 0;
+              sum2026 += Number(manualVal) || 0;
+              sumCob2026 += Number(manualVal) || 0;
             } else {
               const sysM = (monthCobMap[idx] || 0) + (monthMovMap[idx] || 0);
-              sum2025 += sysM;
-              sumCob2025 += monthCobMap[idx] || 0;
-              sumMov2025 += monthMovMap[idx] || 0;
+              sum2026 += sysM;
+              sumCob2026 += monthCobMap[idx] || 0;
+              sumMov2026 += monthMovMap[idx] || 0;
             }
           }
         });
 
-        finalTotal = sum2025;
-        finalCob = sumCob2025;
-        finalMov = sumMov2025;
+        finalTotal = sum2026;
+        finalCob = sumCob2026;
+        finalMov = sumMov2026;
       }
-      // 4. Anos anteriores a 2025 (< 2025): valores salvos ou históricos
+      // 4. Anos anteriores ou iguais a 2025 (<= 2025): valores salvos ou históricos
       else {
         if (savedForYear) {
           const sumManual = Object.values(savedForYear).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
@@ -675,8 +675,8 @@ function FaturamentoGeralPage() {
     window.print();
   };
 
-  const isAllMonthsAuto = ano > 2025;
-  const isPartiallyAuto = ano === 2025;
+  const isAllMonthsAuto = ano > 2026;
+  const isPartiallyAuto = ano === 2026;
 
   return (
     <AppLayout>
@@ -994,14 +994,14 @@ function FaturamentoGeralPage() {
                 </span>
               ) : isPartiallyAuto ? (
                 <span>
-                  Ano 2025: Meses de <strong className="text-foreground">AGO a DEZ</strong> são sincronizados automaticamente com o sistema (sem inclusão manual). Meses de <strong className="text-foreground">JAN a JUL</strong> permitem inclusão manual de histórico.
+                  Ano 2026: Meses de <strong className="text-foreground">AGO a DEZ</strong> são sincronizados automaticamente com o sistema (sem inclusão manual). Meses de <strong className="text-foreground">JAN a JUL</strong> possuem os valores informados de histórico.
                 </span>
               ) : isManualEdit ? (
                 <span className="text-amber-600 dark:text-amber-400 font-medium">
                   Modo de edição manual ativo. Clique em "Salvar" para gravar ou "Sincronizar" para recarregar do banco.
                 </span>
               ) : (
-                <span>Valores sincronizados automaticamente com os recebimentos do sistema no ano de {ano}.</span>
+                <span>Valores consolidados no histórico do sistema para o ano de {ano}.</span>
               )}
             </span>
             <span>Ano selecionado: <strong>{ano}</strong></span>
