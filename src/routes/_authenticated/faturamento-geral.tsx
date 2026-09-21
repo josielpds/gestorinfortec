@@ -96,6 +96,20 @@ const HISTORICO_FATURAMENTO_BASE: Record<number, number> = {
   2025: 103699.35,
 };
 
+/**
+ * Regra de automação e bloqueio de inclusão manual:
+ * - Anos posteriores a 2025 (2026, 2027, etc.): 100% dos meses (JAN a DEZ) sincronizados automaticamente e bloqueados para edição manual.
+ * - Ano de 2025: Meses de AGO a DEZ sincronizados automaticamente com os dados do sistema e bloqueados para edição manual (JAN a JUL permitem ajuste manual de histórico).
+ * - Anos anteriores a 2025: Históricos com suporte a edição manual.
+ */
+export function isMonthAutoLocked(year: number, monthKey: MonthKey): boolean {
+  if (year > 2025) return true;
+  if (year === 2025) {
+    return ["ago", "set", "out", "nov", "dez"].includes(monthKey);
+  }
+  return false;
+}
+
 interface FaturamentoGeralData {
   manualValues?: MonthlyValues;
   cobrancasValues?: MonthlyValues;
@@ -161,7 +175,7 @@ function FaturamentoGeralPage() {
   });
 
   const mapSavedConfigs = useMemo(() => {
-    const map: Record<number, number> = {};
+    const map: Record<number, MonthlyValues> = {};
     allSavedConfigs.forEach((item) => {
       try {
         const yStr = item.key.replace("faturamento_geral_", "");
@@ -169,8 +183,7 @@ function FaturamentoGeralPage() {
         if (yNum) {
           const parsed = JSON.parse(item.value) as FaturamentoGeralData;
           if (parsed.manualValues) {
-            const sum = Object.values(parsed.manualValues).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
-            if (sum > 0) map[yNum] = sum;
+            map[yNum] = parsed.manualValues;
           }
         }
       } catch {
@@ -246,11 +259,11 @@ function FaturamentoGeralPage() {
       }
     });
 
-    // Se for ano histórico (2021..2025) e não houver lançamentos no banco de dados para esse ano,
+    // Se for ano histórico anterior a 2025 e não houver lançamentos no banco de dados para esse ano,
     // distribui o valor histórico igualmente nos 12 meses como sugestão inicial
     const baseHist = HISTORICO_FATURAMENTO_BASE[ano];
     const systemTotal = Object.values(totMap).reduce((a, b) => a + b, 0);
-    if (systemTotal === 0 && baseHist !== undefined) {
+    if (ano < 2025 && systemTotal === 0 && baseHist !== undefined) {
       const perMonth = Math.round((baseHist / 12) * 100) / 100;
       let remainder = baseHist;
       MONTHS.forEach((m, idx) => {
@@ -275,8 +288,15 @@ function FaturamentoGeralPage() {
   // Sync custom values when config loads or year changes
   useEffect(() => {
     if (savedConfig?.manualValues) {
-      setCustomValues(savedConfig.manualValues);
-      setIsManualEdit(savedConfig.mode === "manual");
+      const merged = { ...totalMesSistema, ...savedConfig.manualValues };
+      // Garantir que meses travados (automáticos) recebam os dados do sistema
+      MONTHS.forEach((m) => {
+        if (isMonthAutoLocked(ano, m.key)) {
+          merged[m.key] = totalMesSistema[m.key];
+        }
+      });
+      setCustomValues(merged);
+      setIsManualEdit(ano <= 2025 && savedConfig.mode === "manual");
     } else {
       setCustomValues(totalMesSistema);
     }
@@ -284,15 +304,27 @@ function FaturamentoGeralPage() {
 
   // Values currently active for calculations & table
   const activeMonthlyValues = useMemo(() => {
-    return isManualEdit ? customValues : totalMesSistema;
-  }, [isManualEdit, customValues, totalMesSistema]);
+    const result = defaultMonthlyValues();
+    MONTHS.forEach((m) => {
+      if (isMonthAutoLocked(ano, m.key)) {
+        // Meses de AGO a DEZ em 2025 e todos os meses em anos seguintes: sempre dados reais do sistema
+        result[m.key] = totalMesSistema[m.key] || 0;
+      } else {
+        // Meses manuais/históricos (ex: JAN a JUL 2025 ou anos anteriores)
+        result[m.key] = isManualEdit
+          ? (customValues[m.key] ?? totalMesSistema[m.key] ?? 0)
+          : (savedConfig?.manualValues?.[m.key] ?? customValues[m.key] ?? totalMesSistema[m.key] ?? 0);
+      }
+    });
+    return result;
+  }, [ano, isManualEdit, customValues, totalMesSistema, savedConfig]);
 
-  // Save custom values mutation
+  // Save custom values mutation (usado para meses manuais de anos passados e Jan-Jul 2025)
   const saveMutation = useMutation({
     mutationFn: async (modeToSave: "automatic" | "manual" = isManualEdit ? "manual" : "automatic") => {
       const user_id = await currentUserId();
       const payload: FaturamentoGeralData = {
-        manualValues: customValues,
+        manualValues: activeMonthlyValues,
         cobrancasValues: cobrancasMes,
         movimentacoesValues: movimentacoesMes,
         mode: modeToSave,
@@ -397,56 +429,102 @@ function FaturamentoGeralPage() {
     const result = anosDisponiveis.map((y) => {
       let totCob = 0;
       let totMov = 0;
+      const monthCobMap: Record<number, number> = {};
+      const monthMovMap: Record<number, number> = {};
 
       cobrancasData.forEach((c) => {
         const d = c.data_pagamento || c.vencimento || c.created_at;
         if (d && parseInt(d.substring(0, 4), 10) === y) {
-          totCob += Number(c.valor) || 0;
+          const val = Number(c.valor) || 0;
+          totCob += val;
+          const mIdx = parseInt(d.substring(5, 7), 10) - 1;
+          monthCobMap[mIdx] = (monthCobMap[mIdx] || 0) + val;
         }
       });
 
       movimentacoesData.forEach((m) => {
         if (m.data && parseInt(m.data.substring(0, 4), 10) === y) {
-          totMov += Number(m.valor) || 0;
+          const val = Number(m.valor) || 0;
+          totMov += val;
+          const mIdx = parseInt(m.data.substring(5, 7), 10) - 1;
+          monthMovMap[mIdx] = (monthMovMap[mIdx] || 0) + val;
         }
       });
 
       const totalSistema = totCob + totMov;
       const baseHistorica = HISTORICO_FATURAMENTO_BASE[y];
+      const savedForYear = mapSavedConfigs[y];
 
       let finalTotal = totalSistema;
       let finalCob = totCob;
       let finalMov = totMov;
 
-      // 1. Se for o ano atualmente selecionado e preenchido na tela, usa o valor ativo em tempo real
+      // 1. Se for o ano atualmente selecionado, usa o valor ativo calculado em tempo real
       if (y === ano) {
         finalTotal = totalAno;
         finalCob = totalCobrancasAno > 0 ? totalCobrancasAno : totalAno;
         finalMov = totalMovimentacoesAno;
       }
-      // 2. Se houver configuração salva para o ano 'y' no banco, usa os dados salvos
-      else if (mapSavedConfigs[y] !== undefined && mapSavedConfigs[y] > 0) {
-        finalTotal = mapSavedConfigs[y];
-        finalCob = mapSavedConfigs[y];
-        finalMov = 0;
-      }
-      // 3. Anos 2021 a 2024: valores históricos base fornecidos
-      else if (y < 2025 && baseHistorica !== undefined) {
-        finalTotal = baseHistorica;
-        finalCob = baseHistorica;
-        finalMov = 0;
-      }
-      // 4. Ano 2025: histórico base ou sistema se maior
-      else if (y === 2025 && baseHistorica !== undefined) {
-        finalTotal = totalSistema > 0 ? totalSistema : baseHistorica;
-        finalCob = totCob > 0 ? totCob : baseHistorica;
-        finalMov = totMov;
-      }
-      // 5. Demais anos: dados do sistema
-      else {
+      // 2. Anos > 2025 (2026, 2027, etc.): 100% dados reais do sistema
+      else if (y > 2025) {
         finalTotal = totalSistema;
         finalCob = totCob;
         finalMov = totMov;
+      }
+      // 3. Ano 2025: JAN a JUL de configuração salva (ou histórico) + AGO a DEZ do sistema
+      else if (y === 2025) {
+        let sum2025 = 0;
+        let sumCob2025 = 0;
+        let sumMov2025 = 0;
+
+        MONTHS.forEach((m, idx) => {
+          if (isMonthAutoLocked(2025, m.key)) {
+            // AGO a DEZ: sistema
+            const sysM = (monthCobMap[idx] || 0) + (monthMovMap[idx] || 0);
+            sum2025 += sysM;
+            sumCob2025 += monthCobMap[idx] || 0;
+            sumMov2025 += monthMovMap[idx] || 0;
+          } else {
+            // JAN a JUL: valor salvo ou valor da base se houver
+            const manualVal = savedForYear?.[m.key];
+            if (manualVal !== undefined) {
+              sum2025 += Number(manualVal) || 0;
+              sumCob2025 += Number(manualVal) || 0;
+            } else {
+              const sysM = (monthCobMap[idx] || 0) + (monthMovMap[idx] || 0);
+              sum2025 += sysM;
+              sumCob2025 += monthCobMap[idx] || 0;
+              sumMov2025 += monthMovMap[idx] || 0;
+            }
+          }
+        });
+
+        finalTotal = sum2025 > 0 ? sum2025 : (totalSistema > 0 ? totalSistema : (baseHistorica || 0));
+        finalCob = sumCob2025 > 0 ? sumCob2025 : totCob;
+        finalMov = sumMov2025;
+      }
+      // 4. Anos anteriores a 2025 (< 2025): valores salvos ou históricos
+      else {
+        if (savedForYear) {
+          const sumManual = Object.values(savedForYear).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
+          if (sumManual > 0) {
+            finalTotal = sumManual;
+            finalCob = sumManual;
+            finalMov = 0;
+          } else if (baseHistorica !== undefined) {
+            finalTotal = baseHistorica;
+            finalCob = baseHistorica;
+            finalMov = 0;
+          }
+        } else if (baseHistorica !== undefined) {
+          finalTotal = baseHistorica;
+          finalCob = baseHistorica;
+          finalMov = 0;
+        } else {
+          finalTotal = totalSistema;
+          finalCob = totCob;
+          finalMov = totMov;
+        }
       }
 
       return {
@@ -510,6 +588,10 @@ function FaturamentoGeralPage() {
 
   // Handlers for manual table changes
   const handleCellChange = (month: MonthKey, valueStr: string) => {
+    if (isMonthAutoLocked(ano, month)) {
+      toast.info(`O faturamento de ${month.toUpperCase()} em ${ano} é sincronizado automaticamente pelo sistema.`);
+      return;
+    }
     const num = parseBRLInput(valueStr);
     setIsManualEdit(true);
     setCustomValues((prev) => ({ ...prev, [month]: num }));
@@ -524,14 +606,15 @@ function FaturamentoGeralPage() {
   // Export CSV
   const handleExportCSV = () => {
     let csv = `FATURAMENTO GERAL - ANO ${ano}\n\n`;
-    csv += `MÊS;COBRANÇAS PAGAS;OUTRAS ENTRADAS;TOTAL RECEBIDO\n`;
+    csv += `MÊS;COBRANÇAS PAGAS;OUTRAS ENTRADAS;TOTAL RECEBIDO;TIPO\n`;
     MONTHS.forEach((m) => {
       const cob = cobrancasMes[m.key] || 0;
       const mov = movimentacoesMes[m.key] || 0;
       const tot = activeMonthlyValues[m.key] || 0;
-      csv += `${m.full.toUpperCase()};${cob.toFixed(2)};${mov.toFixed(2)};${tot.toFixed(2)}\n`;
+      const isAuto = isMonthAutoLocked(ano, m.key);
+      csv += `${m.full.toUpperCase()};${cob.toFixed(2)};${mov.toFixed(2)};${tot.toFixed(2)};${isAuto ? "AUTOMÁTICO" : "MANUAL"}\n`;
     });
-    csv += `TOTAL ANO;${totalCobrancasAno.toFixed(2)};${totalMovimentacoesAno.toFixed(2)};${totalAno.toFixed(2)}\n\n`;
+    csv += `TOTAL ANO;${totalCobrancasAno.toFixed(2)};${totalMovimentacoesAno.toFixed(2)};${totalAno.toFixed(2)};-\n\n`;
 
     csv += `EVOLUÇÃO HISTÓRICA ANO A ANO\n`;
     csv += `ANO;TOTAL FATURADO;CRESCIMENTO (%)\n`;
@@ -553,6 +636,9 @@ function FaturamentoGeralPage() {
   const handlePrint = () => {
     window.print();
   };
+
+  const isAllMonthsAuto = ano > 2025;
+  const isPartiallyAuto = ano === 2025;
 
   return (
     <AppLayout>
@@ -648,15 +734,17 @@ function FaturamentoGeralPage() {
               Imprimir
             </Button>
 
-            <Button
-              onClick={() => saveMutation.mutate(isManualEdit ? "manual" : "automatic")}
-              disabled={saveMutation.isPending}
-              size="sm"
-              className="gap-1.5 bg-sky-600 hover:bg-sky-700 text-white font-semibold shadow-sm text-xs sm:text-sm"
-            >
-              <Save className="h-4 w-4" />
-              {saveMutation.isPending ? "Salvando..." : "Salvar"}
-            </Button>
+            {!isAllMonthsAuto && (
+              <Button
+                onClick={() => saveMutation.mutate(isManualEdit ? "manual" : "automatic")}
+                disabled={saveMutation.isPending}
+                size="sm"
+                className="gap-1.5 bg-sky-600 hover:bg-sky-700 text-white font-semibold shadow-sm text-xs sm:text-sm"
+              >
+                <Save className="h-4 w-4" />
+                {saveMutation.isPending ? "Salvando..." : "Salvar"}
+              </Button>
+            )}
           </div>
         </div>
 
@@ -774,14 +862,26 @@ function FaturamentoGeralPage() {
               <table className="w-full text-xs sm:text-sm border-collapse min-w-[960px]">
                 <thead>
                   <tr className="bg-zinc-300 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border-b border-border">
-                    {MONTHS.map((m) => (
-                      <th
-                        key={m.key}
-                        className="py-2.5 px-2 font-bold text-center border-r border-border/70 last:border-r-0 min-w-[68px] tracking-wider"
-                      >
-                        {m.label}
-                      </th>
-                    ))}
+                    {MONTHS.map((m) => {
+                      const isLocked = isMonthAutoLocked(ano, m.key);
+                      return (
+                        <th
+                          key={m.key}
+                          className={`py-2 px-2 font-bold text-center border-r border-border/70 last:border-r-0 min-w-[70px] tracking-wider ${
+                            isLocked ? "bg-sky-100/60 dark:bg-sky-950/40 text-sky-950 dark:text-sky-200" : ""
+                          }`}
+                        >
+                          <div className="flex flex-col items-center">
+                            <span>{m.label}</span>
+                            {isLocked && (
+                              <span className="text-[9px] font-bold text-sky-600 dark:text-sky-400 tracking-tight uppercase">
+                                Auto
+                              </span>
+                            )}
+                          </div>
+                        </th>
+                      );
+                    })}
                     <th className="py-2.5 px-4 font-black text-center bg-zinc-400/80 dark:bg-zinc-700 text-zinc-950 dark:text-zinc-100 min-w-[140px] tracking-wider">
                       TOTAL ANO
                     </th>
@@ -791,20 +891,35 @@ function FaturamentoGeralPage() {
                   {/* Linha Principal de Faturamento Geral */}
                   <tr className="bg-background hover:bg-muted/15 transition-colors">
                     {MONTHS.map((m) => {
+                      const isLocked = isMonthAutoLocked(ano, m.key);
                       const val = activeMonthlyValues[m.key] || 0;
                       return (
                         <td
                           key={m.key}
-                          className="p-1 border-r border-border/70 last:border-r-0 align-middle text-right"
+                          className={`p-1 border-r border-border/70 last:border-r-0 align-middle text-right ${
+                            isLocked ? "bg-sky-50/25 dark:bg-sky-950/20" : ""
+                          }`}
                         >
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={formatInputValue(val)}
-                            onChange={(e) => handleCellChange(m.key, e.target.value)}
-                            placeholder="0,00"
-                            className="w-full text-right px-2 py-2.5 font-bold text-foreground bg-transparent rounded border border-transparent hover:border-border focus:border-sky-500 focus:bg-sky-50/10 focus:outline-none transition-all text-xs sm:text-sm"
-                          />
+                          {isLocked ? (
+                            <div
+                              className="px-2 py-2.5 text-right font-extrabold text-foreground text-xs sm:text-sm select-none"
+                              title={`Sincronizado automaticamente com os dados do sistema (${m.full}/${ano})`}
+                            >
+                              {val > 0
+                                ? val.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                : "0,00"}
+                            </div>
+                          ) : (
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              value={formatInputValue(val)}
+                              onChange={(e) => handleCellChange(m.key, e.target.value)}
+                              placeholder="0,00"
+                              title={`Editar valor manual de ${m.full}/${ano}`}
+                              className="w-full text-right px-2 py-2.5 font-bold text-foreground bg-transparent rounded border border-dashed border-amber-300 dark:border-amber-700 hover:border-sky-500 focus:border-sky-500 focus:bg-sky-50/10 focus:outline-none transition-all text-xs sm:text-sm"
+                            />
+                          )}
                         </td>
                       );
                     })}
@@ -821,7 +936,7 @@ function FaturamentoGeralPage() {
                   {/* Linhas de Detalhamento Complementar */}
                   <tr className="bg-muted/20 text-xs text-muted-foreground border-t border-border/60">
                     <td colSpan={12} className="px-3 py-1.5 font-medium italic">
-                      Detalhamento do Sistema: Cobranças Pagas: {brl(totalCobrancasAno)} | Outras Entradas: {brl(totalMovimentacoesAno)}
+                      Detalhamento do Sistema ({ano}): Cobranças Pagas: {brl(totalCobrancasAno)} | Outras Entradas: {brl(totalMovimentacoesAno)}
                     </td>
                     <td className="px-3 py-1.5 text-right font-semibold text-foreground bg-muted/40">
                       Total: {brl(totalAno)}
@@ -832,18 +947,26 @@ function FaturamentoGeralPage() {
             </div>
           </div>
 
-          <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-muted-foreground px-1 gap-2">
             <span className="flex items-center gap-1.5">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-              {isManualEdit ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+              {isAllMonthsAuto ? (
+                <span className="text-sky-700 dark:text-sky-300 font-medium">
+                  Ano {ano}: 100% sincronizado automaticamente com os dados do sistema (inclusão manual desativada).
+                </span>
+              ) : isPartiallyAuto ? (
+                <span>
+                  Ano 2025: Meses de <strong className="text-foreground">AGO a DEZ</strong> são sincronizados automaticamente com o sistema (sem inclusão manual). Meses de <strong className="text-foreground">JAN a JUL</strong> permitem inclusão manual de histórico.
+                </span>
+              ) : isManualEdit ? (
                 <span className="text-amber-600 dark:text-amber-400 font-medium">
                   Modo de edição manual ativo. Clique em "Salvar" para gravar ou "Sincronizar" para recarregar do banco.
                 </span>
               ) : (
-                <span>Valores sincronizados automaticamente com todos os recebimentos do sistema no ano de {ano}.</span>
+                <span>Valores sincronizados automaticamente com os recebimentos do sistema no ano de {ano}.</span>
               )}
             </span>
-            <span>Ano: <strong>{ano}</strong></span>
+            <span>Ano selecionado: <strong>{ano}</strong></span>
           </div>
         </div>
 
@@ -1137,15 +1260,17 @@ function FaturamentoGeralPage() {
               <RotateCcw className="h-3.5 w-3.5 mr-1" />
               Restaurar Dados do Sistema
             </Button>
-            <Button
-              size="sm"
-              className="h-8 text-xs bg-sky-600 hover:bg-sky-700 text-white font-semibold"
-              onClick={() => saveMutation.mutate(isManualEdit ? "manual" : "automatic")}
-              disabled={saveMutation.isPending}
-            >
-              <Save className="h-3.5 w-3.5 mr-1" />
-              Salvar Alterações
-            </Button>
+            {!isAllMonthsAuto && (
+              <Button
+                size="sm"
+                className="h-8 text-xs bg-sky-600 hover:bg-sky-700 text-white font-semibold"
+                onClick={() => saveMutation.mutate(isManualEdit ? "manual" : "automatic")}
+                disabled={saveMutation.isPending}
+              >
+                <Save className="h-3.5 w-3.5 mr-1" />
+                Salvar Alterações
+              </Button>
+            )}
           </div>
         </div>
       </div>
