@@ -97,6 +97,26 @@ const HISTORICO_FATURAMENTO_BASE: Record<number, number> = {
 };
 
 /**
+ * Valores manuais fixos de Janeiro a Julho de 2025 (período anterior à operação no sistema):
+ * JAN: R$ 8.498,19 | FEV: R$ 9.323,98 | MAR: R$ 10.011,19 | ABR: R$ 9.864,88
+ * MAI: R$ 9.525,19 | JUN: R$ 9.477,19 | JUL: R$ 10.193,19
+ */
+const VALORES_BASE_2025_MANUAL: MonthlyValues = {
+  jan: 8498.19,
+  fev: 9323.98,
+  mar: 10011.19,
+  abr: 9864.88,
+  mai: 9525.19,
+  jun: 9477.19,
+  jul: 10193.19,
+  ago: 0,
+  set: 0,
+  out: 0,
+  nov: 0,
+  dez: 0,
+};
+
+/**
  * Regra de automação e bloqueio de inclusão manual:
  * - Anos posteriores a 2025 (2026, 2027, etc.): 100% dos meses (JAN a DEZ) sincronizados automaticamente e bloqueados para edição manual.
  * - Ano de 2025: Meses de AGO a DEZ sincronizados automaticamente com os dados do sistema e bloqueados para edição manual (JAN a JUL permitem ajuste manual de histórico).
@@ -289,6 +309,13 @@ function FaturamentoGeralPage() {
   useEffect(() => {
     if (savedConfig?.manualValues) {
       const merged = { ...totalMesSistema, ...savedConfig.manualValues };
+      if (ano === 2025) {
+        MONTHS.forEach((m) => {
+          if (!isMonthAutoLocked(2025, m.key) && (merged[m.key] === undefined || merged[m.key] === 0)) {
+            merged[m.key] = VALORES_BASE_2025_MANUAL[m.key] || 0;
+          }
+        });
+      }
       // Garantir que meses travados (automáticos) recebam os dados do sistema
       MONTHS.forEach((m) => {
         if (isMonthAutoLocked(ano, m.key)) {
@@ -298,7 +325,17 @@ function FaturamentoGeralPage() {
       setCustomValues(merged);
       setIsManualEdit(ano <= 2025 && savedConfig.mode === "manual");
     } else {
-      setCustomValues(totalMesSistema);
+      if (ano === 2025) {
+        const initial2025 = { ...totalMesSistema, ...VALORES_BASE_2025_MANUAL };
+        MONTHS.forEach((m) => {
+          if (isMonthAutoLocked(2025, m.key)) {
+            initial2025[m.key] = totalMesSistema[m.key];
+          }
+        });
+        setCustomValues(initial2025);
+      } else {
+        setCustomValues(totalMesSistema);
+      }
     }
   }, [savedConfig, ano, totalMesSistema]);
 
@@ -311,9 +348,10 @@ function FaturamentoGeralPage() {
         result[m.key] = totalMesSistema[m.key] || 0;
       } else {
         // Meses manuais/históricos (ex: JAN a JUL 2025 ou anos anteriores)
+        const base2025 = ano === 2025 ? VALORES_BASE_2025_MANUAL[m.key] : undefined;
         result[m.key] = isManualEdit
-          ? (customValues[m.key] ?? totalMesSistema[m.key] ?? 0)
-          : (savedConfig?.manualValues?.[m.key] ?? customValues[m.key] ?? totalMesSistema[m.key] ?? 0);
+          ? (customValues[m.key] ?? base2025 ?? totalMesSistema[m.key] ?? 0)
+          : (savedConfig?.manualValues?.[m.key] ?? customValues[m.key] ?? base2025 ?? totalMesSistema[m.key] ?? 0);
       }
     });
     return result;
@@ -471,7 +509,7 @@ function FaturamentoGeralPage() {
         finalCob = totCob;
         finalMov = totMov;
       }
-      // 3. Ano 2025: JAN a JUL de configuração salva (ou histórico) + AGO a DEZ do sistema
+      // 3. Ano 2025: JAN a JUL de configuração salva (ou histórico base manual) + AGO a DEZ do sistema
       else if (y === 2025) {
         let sum2025 = 0;
         let sumCob2025 = 0;
@@ -485,8 +523,8 @@ function FaturamentoGeralPage() {
             sumCob2025 += monthCobMap[idx] || 0;
             sumMov2025 += monthMovMap[idx] || 0;
           } else {
-            // JAN a JUL: valor salvo ou valor da base se houver
-            const manualVal = savedForYear?.[m.key];
+            // JAN a JUL: valor salvo ou valor da base manual informada
+            const manualVal = savedForYear?.[m.key] ?? VALORES_BASE_2025_MANUAL[m.key];
             if (manualVal !== undefined) {
               sum2025 += Number(manualVal) || 0;
               sumCob2025 += Number(manualVal) || 0;
@@ -499,8 +537,8 @@ function FaturamentoGeralPage() {
           }
         });
 
-        finalTotal = sum2025 > 0 ? sum2025 : (totalSistema > 0 ? totalSistema : (baseHistorica || 0));
-        finalCob = sumCob2025 > 0 ? sumCob2025 : totCob;
+        finalTotal = sum2025;
+        finalCob = sumCob2025;
         finalMov = sumMov2025;
       }
       // 4. Anos anteriores a 2025 (< 2025): valores salvos ou históricos
