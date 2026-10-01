@@ -10,6 +10,7 @@ import { brl } from "@/lib/format";
 import { currentUserId } from "@/hooks/useCurrentUser";
 import {
   TrendingUp,
+  TrendingDown,
   Save,
   RotateCcw,
   Sparkles,
@@ -26,6 +27,9 @@ import {
   BarChart3,
   CheckCircle2,
   CalendarRange,
+  Wallet,
+  MinusCircle,
+  Percent,
 } from "lucide-react";
 import {
   BarChart,
@@ -242,7 +246,35 @@ function FaturamentoGeralPage() {
     },
   });
 
-  // 4. Calculate actual system monthly values for current selected year
+  // 3.1 Query all contas_pagar (paid expenses)
+  const { data: contasPagarData = [] } = useQuery({
+    queryKey: ["contas_pagar_faturamento_geral"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("contas_pagar")
+        .select("id, valor, status, vencimento, pago_em, created_at, categoria");
+
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // 3.2 Query all movimentacoes de saida (standalone manual paid expenses)
+  const { data: movimentacoesSaidaData = [] } = useQuery({
+    queryKey: ["movimentacoes_saida_faturamento_geral"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("movimentacoes")
+        .select("id, valor, tipo, status, data, conta_pagar_id, categoria")
+        .eq("tipo", "saida")
+        .is("conta_pagar_id", null);
+
+      if (error) throw error;
+      return (data || []).filter((m) => !m.status || m.status === "pago");
+    },
+  });
+
+  // 4. Calculate actual system monthly revenue values for current selected year
   const { cobrancasMes, movimentacoesMes, totalMesSistema } = useMemo(() => {
     const cobMap = defaultMonthlyValues();
     const movMap = defaultMonthlyValues();
@@ -264,7 +296,7 @@ function FaturamentoGeralPage() {
       }
     });
 
-    // Process movimentações avulsas
+    // Process movimentações avulsas de entrada
     movimentacoesData.forEach((m) => {
       if (!m.data) return;
       const mYear = parseInt(m.data.substring(0, 4), 10);
@@ -305,6 +337,51 @@ function FaturamentoGeralPage() {
     };
   }, [cobrancasData, movimentacoesData, ano]);
 
+  // 4.1 Calculate monthly expenses (Contas a Pagar pagas + Saídas Avulsas) for current selected year
+  const { despesasContasMes, despesasSaidasMes, totalDespesasMes } = useMemo(() => {
+    const cpMap = defaultMonthlyValues();
+    const movMap = defaultMonthlyValues();
+    const totMap = defaultMonthlyValues();
+
+    // Contas a pagar quitadas/pagas
+    contasPagarData.forEach((cp) => {
+      if (cp.status !== "pago") return;
+      const dateStr = cp.pago_em || cp.vencimento || cp.created_at;
+      if (!dateStr) return;
+      const cpYear = parseInt(dateStr.substring(0, 4), 10);
+      if (cpYear === ano) {
+        const monthIdx = parseInt(dateStr.substring(5, 7), 10) - 1;
+        if (monthIdx >= 0 && monthIdx < 12) {
+          const key = MONTHS[monthIdx].key;
+          const val = Number(cp.valor) || 0;
+          cpMap[key] += val;
+          totMap[key] += val;
+        }
+      }
+    });
+
+    // Saídas avulsas manuais pagas
+    movimentacoesSaidaData.forEach((m) => {
+      if (!m.data) return;
+      const mYear = parseInt(m.data.substring(0, 4), 10);
+      if (mYear === ano) {
+        const monthIdx = parseInt(m.data.substring(5, 7), 10) - 1;
+        if (monthIdx >= 0 && monthIdx < 12) {
+          const key = MONTHS[monthIdx].key;
+          const val = Number(m.valor) || 0;
+          movMap[key] += val;
+          totMap[key] += val;
+        }
+      }
+    });
+
+    return {
+      despesasContasMes: cpMap,
+      despesasSaidasMes: movMap,
+      totalDespesasMes: totMap,
+    };
+  }, [contasPagarData, movimentacoesSaidaData, ano]);
+
   // Sync custom values when config loads or year changes
   useEffect(() => {
     if (savedConfig?.manualValues) {
@@ -339,7 +416,7 @@ function FaturamentoGeralPage() {
     }
   }, [savedConfig, ano, totalMesSistema]);
 
-  // Values currently active for calculations & table
+  // Values currently active for gross revenue calculations & table
   const activeMonthlyValues = useMemo(() => {
     const result = defaultMonthlyValues();
     MONTHS.forEach((m) => {
@@ -389,7 +466,7 @@ function FaturamentoGeralPage() {
     },
   });
 
-  // Calculate annual totals and metrics
+  // Calculate annual totals and metrics (Bruto, Despesas e Líquido)
   const totalAno = useMemo(() => {
     return Object.values(activeMonthlyValues).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
   }, [activeMonthlyValues]);
@@ -402,16 +479,52 @@ function FaturamentoGeralPage() {
     return Object.values(movimentacoesMes).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
   }, [movimentacoesMes]);
 
+  const totalContasPagarAno = useMemo(() => {
+    return Object.values(despesasContasMes).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
+  }, [despesasContasMes]);
+
+  const totalSaidasAvulsasAno = useMemo(() => {
+    return Object.values(despesasSaidasMes).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
+  }, [despesasSaidasMes]);
+
+  const totalDespesasAno = useMemo(() => {
+    return Object.values(totalDespesasMes).reduce((acc, curr) => acc + (Number(curr) || 0), 0);
+  }, [totalDespesasMes]);
+
+  // Faturamento Líquido mês a mês (Bruto - Despesas)
+  const faturamentoLiquidoMes = useMemo(() => {
+    const res = defaultMonthlyValues();
+    MONTHS.forEach((m) => {
+      const bruto = activeMonthlyValues[m.key] || 0;
+      const despesa = totalDespesasMes[m.key] || 0;
+      res[m.key] = bruto - despesa;
+    });
+    return res;
+  }, [activeMonthlyValues, totalDespesasMes]);
+
+  const totalLiquidoAno = useMemo(() => {
+    return totalAno - totalDespesasAno;
+  }, [totalAno, totalDespesasAno]);
+
+  const margemLiquidaAno = useMemo(() => {
+    return totalAno > 0 ? (totalLiquidoAno / totalAno) * 100 : 0;
+  }, [totalAno, totalLiquidoAno]);
+
   // Best month & monthly average
-  const { melhorMes, mediaMensal } = useMemo(() => {
+  const { melhorMes, mediaMensal, melhorMesLiquido, mediaMensalLiquida } = useMemo(() => {
     let maxVal = -1;
     let maxMonth = "—";
     let minVal = Infinity;
     let minMonth = "—";
     let monthsWithData = 0;
 
+    let maxLiqVal = -Infinity;
+    let maxLiqMonth = "—";
+
     MONTHS.forEach((m) => {
       const v = activeMonthlyValues[m.key] || 0;
+      const liq = faturamentoLiquidoMes[m.key] || 0;
+
       if (v > maxVal) {
         maxVal = v;
         maxMonth = m.full;
@@ -421,17 +534,25 @@ function FaturamentoGeralPage() {
         minMonth = m.full;
       }
       if (v > 0) monthsWithData++;
+
+      if (liq > maxLiqVal && v > 0) {
+        maxLiqVal = liq;
+        maxLiqMonth = m.full;
+      }
     });
 
     const avg = totalAno / 12;
+    const avgLiq = totalLiquidoAno / 12;
 
     return {
       melhorMes: { nome: maxVal > 0 ? maxMonth : "—", valor: maxVal > 0 ? maxVal : 0 },
       menorMes: { nome: minVal < Infinity ? minMonth : "—", valor: minVal < Infinity ? minVal : 0 },
       mediaMensal: avg,
+      melhorMesLiquido: { nome: maxLiqVal > -Infinity ? maxLiqMonth : "—", valor: maxLiqVal > -Infinity ? maxLiqVal : 0 },
+      mediaMensalLiquida: avgLiq,
       monthsWithData,
     };
-  }, [activeMonthlyValues, totalAno]);
+  }, [activeMonthlyValues, faturamentoLiquidoMes, totalAno, totalLiquidoAno]);
 
   // 5. Multi-year data calculation for the Year-Over-Year Evolution Chart
   const anosDisponiveis = useMemo(() => {
@@ -459,14 +580,31 @@ function FaturamentoGeralPage() {
       }
     });
 
+    contasPagarData.forEach((cp) => {
+      const d = cp.pago_em || cp.vencimento || cp.created_at;
+      if (d) {
+        const y = parseInt(d.substring(0, 4), 10);
+        if (y > 2000 && y < 2100) yearSet.add(y);
+      }
+    });
+
+    movimentacoesSaidaData.forEach((m) => {
+      if (m.data) {
+        const y = parseInt(m.data.substring(0, 4), 10);
+        if (y > 2000 && y < 2100) yearSet.add(y);
+      }
+    });
+
     return Array.from(yearSet).sort((a, b) => a - b);
-  }, [cobrancasData, movimentacoesData, allSavedConfigs, currentYear, ano]);
+  }, [cobrancasData, movimentacoesData, contasPagarData, movimentacoesSaidaData, allSavedConfigs, currentYear, ano]);
 
   // Year-over-year revenue comparison array (alimentado dinamicamente pelos dados preenchidos / salvos / sistema)
   const dadosEvolucaoAnual = useMemo(() => {
     const result = anosDisponiveis.map((y) => {
       let totCob = 0;
       let totMov = 0;
+      let totDespCP = 0;
+      let totDespMov = 0;
       const monthCobMap: Record<number, number> = {};
       const monthMovMap: Record<number, number> = {};
 
@@ -486,6 +624,20 @@ function FaturamentoGeralPage() {
           totMov += val;
           const mIdx = parseInt(m.data.substring(5, 7), 10) - 1;
           monthMovMap[mIdx] = (monthMovMap[mIdx] || 0) + val;
+        }
+      });
+
+      contasPagarData.forEach((cp) => {
+        if (cp.status !== "pago") return;
+        const d = cp.pago_em || cp.vencimento || cp.created_at;
+        if (d && parseInt(d.substring(0, 4), 10) === y) {
+          totDespCP += Number(cp.valor) || 0;
+        }
+      });
+
+      movimentacoesSaidaData.forEach((m) => {
+        if (m.data && parseInt(m.data.substring(0, 4), 10) === y) {
+          totDespMov += Number(m.valor) || 0;
         }
       });
 
@@ -565,12 +717,19 @@ function FaturamentoGeralPage() {
         }
       }
 
+      const finalDespesas = y === ano ? totalDespesasAno : (totDespCP + totDespMov);
+      const finalLiquido = finalTotal - finalDespesas;
+      const finalMargem = finalTotal > 0 ? (finalLiquido / finalTotal) * 100 : 0;
+
       return {
         ano: String(y),
         anoNum: y,
         Cobranças: finalCob,
         "Outras Entradas": finalMov,
         Total: finalTotal,
+        Despesas: finalDespesas,
+        Liquido: finalLiquido,
+        Margem: finalMargem,
       };
     });
 
@@ -588,10 +747,13 @@ function FaturamentoGeralPage() {
     anosDisponiveis,
     cobrancasData,
     movimentacoesData,
+    contasPagarData,
+    movimentacoesSaidaData,
     ano,
     totalAno,
     totalCobrancasAno,
     totalMovimentacoesAno,
+    totalDespesasAno,
     mapSavedConfigs,
   ]);
 
@@ -612,6 +774,8 @@ function FaturamentoGeralPage() {
       const valTotal = activeMonthlyValues[m.key] || 0;
       const valCob = cobrancasMes[m.key] || 0;
       const valMov = movimentacoesMes[m.key] || 0;
+      const valDesp = totalDespesasMes[m.key] || 0;
+      const valLiq = faturamentoLiquidoMes[m.key] || 0;
 
       return {
         mes: m.label,
@@ -619,10 +783,12 @@ function FaturamentoGeralPage() {
         Total: valTotal,
         Cobranças: valCob,
         "Outras Entradas": valMov,
+        Despesas: valDesp,
+        "Faturamento Líquido": valLiq,
         media: mediaMensal,
       };
     });
-  }, [activeMonthlyValues, cobrancasMes, movimentacoesMes, mediaMensal]);
+  }, [activeMonthlyValues, cobrancasMes, movimentacoesMes, totalDespesasMes, faturamentoLiquidoMes, mediaMensal]);
 
   // Handlers for manual table changes
   const handleCellChange = (month: MonthKey, valueStr: string) => {
@@ -643,28 +809,32 @@ function FaturamentoGeralPage() {
 
   // Export CSV
   const handleExportCSV = () => {
-    let csv = `FATURAMENTO GERAL - ANO ${ano}\n\n`;
-    csv += `MÊS;COBRANÇAS PAGAS;OUTRAS ENTRADAS;TOTAL RECEBIDO;TIPO\n`;
+    let csv = `FATURAMENTO GERAL E LÍQUIDO - ANO ${ano}\n\n`;
+    csv += `MÊS;FATURAMENTO BRUTO;COBRANÇAS PAGAS;OUTRAS ENTRADAS;DESPESAS TOTAIS;FATURAMENTO LÍQUIDO;MARGEM (%);TIPO\n`;
     MONTHS.forEach((m) => {
       const cob = cobrancasMes[m.key] || 0;
       const mov = movimentacoesMes[m.key] || 0;
       const tot = activeMonthlyValues[m.key] || 0;
+      const desp = totalDespesasMes[m.key] || 0;
+      const liq = faturamentoLiquidoMes[m.key] || 0;
+      const margem = tot > 0 ? ((liq / tot) * 100).toFixed(1) : "0.0";
       const isAuto = isMonthAutoLocked(ano, m.key);
-      csv += `${m.full.toUpperCase()};${cob.toFixed(2)};${mov.toFixed(2)};${tot.toFixed(2)};${isAuto ? "AUTOMÁTICO" : "MANUAL"}\n`;
+      csv += `${m.full.toUpperCase()};${tot.toFixed(2)};${cob.toFixed(2)};${mov.toFixed(2)};${desp.toFixed(2)};${liq.toFixed(2)};${margem}%;${isAuto ? "AUTOMÁTICO" : "MANUAL"}\n`;
     });
-    csv += `TOTAL ANO;${totalCobrancasAno.toFixed(2)};${totalMovimentacoesAno.toFixed(2)};${totalAno.toFixed(2)};-\n\n`;
+    const margemGeral = totalAno > 0 ? ((totalLiquidoAno / totalAno) * 100).toFixed(1) : "0.0";
+    csv += `TOTAL ANO;${totalAno.toFixed(2)};${totalCobrancasAno.toFixed(2)};${totalMovimentacoesAno.toFixed(2)};${totalDespesasAno.toFixed(2)};${totalLiquidoAno.toFixed(2)};${margemGeral}%;-\n\n`;
 
     csv += `EVOLUÇÃO HISTÓRICA ANO A ANO\n`;
-    csv += `ANO;TOTAL FATURADO;CRESCIMENTO (%)\n`;
+    csv += `ANO;FATURAMENTO BRUTO;DESPESAS;FATURAMENTO LÍQUIDO;MARGEM (%);CRESCIMENTO BRUTO (%)\n`;
     dadosEvolucaoAnual.forEach((d) => {
-      csv += `${d.ano};${d.Total.toFixed(2)};${d.crescimentoLabel}\n`;
+      csv += `${d.ano};${d.Total.toFixed(2)};${d.Despesas.toFixed(2)};${d.Liquido.toFixed(2)};${d.Margem.toFixed(1)}%;${d.crescimentoLabel}\n`;
     });
 
     const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `faturamento_geral_${ano}.csv`);
+    link.setAttribute("download", `faturamento_geral_e_liquido_${ano}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -693,7 +863,7 @@ function FaturamentoGeralPage() {
                   Faturamento Geral
                 </h1>
                 <p className="text-sm text-muted-foreground">
-                  Resumo de todos os recebimentos mês a mês e acompanhamento da evolução ano a ano
+                  Resumo de todos os recebimentos mês a mês, faturamento líquido após despesas e evolução consolidada
                 </p>
               </div>
             </div>
@@ -744,7 +914,7 @@ function FaturamentoGeralPage() {
               size="sm"
               onClick={handleResetToSystem}
               className="gap-1.5 shadow-sm text-xs sm:text-sm"
-              title="Recalcular com as entradas e cobranças do banco de dados"
+              title="Recalcular com as entradas, cobranças e despesas do banco de dados"
             >
               <Sparkles className="h-4 w-4 text-sky-500" />
               Sincronizar
@@ -786,19 +956,19 @@ function FaturamentoGeralPage() {
           </div>
         </div>
 
-        {/* Top Summary KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Total Faturado */}
+        {/* Top Summary KPI Cards (Bruto, Despesas e Líquido) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {/* Total Faturado Bruto */}
           <Card className="border-border/60 shadow-sm relative overflow-hidden bg-card">
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-sky-500" />
             <CardHeader className="pb-2 pt-4 flex flex-row items-center justify-between">
               <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <DollarSign className="h-4 w-4 text-sky-500" />
-                Faturamento Total ({ano})
+                Faturamento Bruto ({ano})
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1 pt-0 pb-4">
-              <div className="text-2xl sm:text-3xl font-extrabold text-foreground">
+              <div className="text-2xl font-extrabold text-foreground">
                 {brl(totalAno)}
               </div>
               <div className="flex items-center gap-1 text-xs pt-1 text-muted-foreground">
@@ -825,56 +995,85 @@ function FaturamentoGeralPage() {
             </CardContent>
           </Card>
 
-          {/* Média Mensal */}
+          {/* Total de Despesas */}
+          <Card className="border-border/60 shadow-sm relative overflow-hidden bg-card">
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-rose-500" />
+            <CardHeader className="pb-2 pt-4 flex flex-row items-center justify-between">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <MinusCircle className="h-4 w-4 text-rose-500" />
+                Total Despesas ({ano})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 pt-0 pb-4">
+              <div className="text-2xl font-extrabold text-rose-600 dark:text-rose-400">
+                {brl(totalDespesasAno)}
+              </div>
+              <div className="text-xs text-muted-foreground pt-1">
+                {totalAno > 0 ? (
+                  <span>
+                    Representa <strong className="text-rose-600 dark:text-rose-400">{((totalDespesasAno / totalAno) * 100).toFixed(1)}%</strong> do faturamento
+                  </span>
+                ) : (
+                  <span>Contas e saídas quitadas</span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Faturamento Líquido (Destaque Principal) */}
+          <Card className="border-emerald-500/30 shadow-sm relative overflow-hidden bg-emerald-500/5 dark:bg-emerald-950/20">
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-emerald-500" />
+            <CardHeader className="pb-2 pt-4 flex flex-row items-center justify-between">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                <Wallet className="h-4 w-4 text-emerald-500" />
+                Faturamento Líquido ({ano})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 pt-0 pb-4">
+              <div className={`text-2xl font-black ${totalLiquidoAno >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+                {brl(totalLiquidoAno)}
+              </div>
+              <div className="flex items-center gap-1.5 text-xs pt-1">
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full font-bold text-[11px] bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">
+                  <Percent className="h-3 w-3" />
+                  {margemLiquidaAno.toFixed(1)}% margem
+                </span>
+                <span className="text-muted-foreground text-[11px]">após despesas</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Média Mensal Líquida */}
           <Card className="border-border/60 shadow-sm relative overflow-hidden bg-card">
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-indigo-500" />
             <CardHeader className="pb-2 pt-4 flex flex-row items-center justify-between">
               <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <CalendarRange className="h-4 w-4 text-indigo-500" />
-                Média Mensal ({ano})
+                Média Líquida/Mês
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1 pt-0 pb-4">
-              <div className="text-2xl sm:text-3xl font-extrabold text-foreground">
-                {brl(mediaMensal)}
+              <div className="text-2xl font-extrabold text-foreground">
+                {brl(mediaMensalLiquida)}
               </div>
               <div className="text-xs text-muted-foreground pt-1">
-                Projeção anual: <strong className="text-foreground">{brl(mediaMensal * 12)}</strong>
+                Bruta: <strong className="text-foreground">{brl(mediaMensal)}</strong>/mês
               </div>
             </CardContent>
           </Card>
 
-          {/* Melhor Mês */}
-          <Card className="border-border/60 shadow-sm relative overflow-hidden bg-card">
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-emerald-500" />
-            <CardHeader className="pb-2 pt-4 flex flex-row items-center justify-between">
-              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                <TrendingUp className="h-4 w-4 text-emerald-500" />
-                Melhor Mês do Ano
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 pt-0 pb-4">
-              <div className="text-2xl sm:text-3xl font-extrabold text-emerald-600 dark:text-emerald-400">
-                {brl(melhorMes.valor)}
-              </div>
-              <div className="text-xs text-muted-foreground pt-1">
-                Mês de destaque: <strong className="text-foreground">{melhorMes.nome}</strong>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Origem das Receitas */}
+          {/* Origem dos Recebimentos */}
           <Card className="border-border/60 shadow-sm relative overflow-hidden bg-card">
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-amber-500" />
             <CardHeader className="pb-2 pt-4 flex flex-row items-center justify-between">
               <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <Receipt className="h-4 w-4 text-amber-500" />
-                Origem dos Recebimentos
+                Origem das Receitas
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1 pt-0 pb-4 text-xs">
               <div className="flex justify-between items-center py-0.5">
-                <span className="text-muted-foreground">Cobranças / Mensalidades:</span>
+                <span className="text-muted-foreground">Cobranças:</span>
                 <strong className="text-foreground font-semibold">{brl(totalCobrancasAno)}</strong>
               </div>
               <div className="flex justify-between items-center py-0.5">
@@ -885,7 +1084,7 @@ function FaturamentoGeralPage() {
           </Card>
         </div>
 
-        {/* ─── TABELA ESTILO PLANILHA: RESUMO GERAL DE FATURAMENTO (CONFORME MODELO ANEXADO) ─── */}
+        {/* ─── TABELA 1 ESTILO PLANILHA: RESUMO GERAL DE FATURAMENTO (BRUTO) ─── */}
         <div className="space-y-3">
           <div className="rounded-xl border border-border shadow-sm overflow-hidden bg-card">
             {/* Vivid Blue / Cyan Top Banner matching model image */}
@@ -977,7 +1176,7 @@ function FaturamentoGeralPage() {
                       Detalhamento do Sistema ({ano}): Cobranças Pagas: {brl(totalCobrancasAno)} | Outras Entradas: {brl(totalMovimentacoesAno)}
                     </td>
                     <td className="px-3 py-1.5 text-right font-semibold text-foreground bg-muted/40">
-                      Total: {brl(totalAno)}
+                      Total Bruto: {brl(totalAno)}
                     </td>
                   </tr>
                 </tbody>
@@ -1008,6 +1207,147 @@ function FaturamentoGeralPage() {
           </div>
         </div>
 
+        {/* ─── TABELA 2 ESTILO PLANILHA: RESUMO GERAL DE FATURAMENTO LÍQUIDO (ABAIXO DO RESUMO GERAL) ─── */}
+        <div className="space-y-3">
+          <div className="rounded-xl border border-border shadow-sm overflow-hidden bg-card">
+            {/* Emerald Green Top Banner for Liquid Revenue */}
+            <div className="bg-[#059669] text-white dark:bg-[#047857] font-extrabold px-4 py-3 text-center text-sm sm:text-base md:text-lg uppercase tracking-wider border-b border-emerald-600/30 flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-5 w-5 text-emerald-200" />
+              </div>
+              <span className="flex-1 text-center font-black tracking-widest drop-shadow-xs">
+                RESUMO GERAL DE FATURAMENTO LÍQUIDO
+              </span>
+              <div className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-800/60 text-emerald-100 hidden sm:block">
+                Após Despesas
+              </div>
+            </div>
+
+            {/* Excel Grid Table matching model image */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs sm:text-sm border-collapse min-w-[960px]">
+                <thead>
+                  <tr className="bg-emerald-900/15 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border-b border-border">
+                    {MONTHS.map((m) => (
+                      <th
+                        key={m.key}
+                        className="py-2 px-2 font-bold text-center border-r border-border/70 last:border-r-0 min-w-[70px] tracking-wider"
+                      >
+                        <div className="flex flex-col items-center">
+                          <span>{m.label}</span>
+                          <span className="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 tracking-tight">
+                            Líquido
+                          </span>
+                        </div>
+                      </th>
+                    ))}
+                    <th className="py-2.5 px-4 font-black text-center bg-emerald-600 text-white dark:bg-emerald-700 min-w-[140px] tracking-wider">
+                      TOTAL LÍQUIDO
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {/* Linha 1: Faturamento Líquido (Resultado Principal) */}
+                  <tr className="bg-emerald-50/20 dark:bg-emerald-950/15 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/30 transition-colors">
+                    {MONTHS.map((m) => {
+                      const liq = faturamentoLiquidoMes[m.key] || 0;
+                      const isPositive = liq >= 0;
+                      return (
+                        <td
+                          key={m.key}
+                          className="p-1 border-r border-border/70 last:border-r-0 align-middle text-right bg-emerald-50/10 dark:bg-emerald-950/10"
+                        >
+                          <div
+                            className={`px-2 py-2 text-right font-black text-xs sm:text-sm select-none ${
+                              isPositive
+                                ? "text-emerald-700 dark:text-emerald-400"
+                                : "text-rose-600 dark:text-rose-400"
+                            }`}
+                            title={`Faturamento Líquido (${m.full}/${ano}): Bruto ${brl(activeMonthlyValues[m.key] || 0)} - Despesas ${brl(totalDespesasMes[m.key] || 0)}`}
+                          >
+                            {liq.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </td>
+                      );
+                    })}
+                    <td className="p-2 font-black text-right bg-emerald-100/80 dark:bg-emerald-950/60 text-foreground align-middle text-sm sm:text-base border-l border-border">
+                      <div className="flex items-center justify-between gap-1 px-1">
+                        <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">R$</span>
+                        <span className={`font-black ${totalLiquidoAno >= 0 ? "text-emerald-700 dark:text-emerald-300" : "text-rose-600"}`}>
+                          {totalLiquidoAno.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+
+                  {/* Linha 2: Despesas Totais Lançadas no Mês */}
+                  <tr className="bg-background text-xs border-t border-border/50 text-muted-foreground hover:bg-muted/15 transition-colors">
+                    {MONTHS.map((m) => {
+                      const desp = totalDespesasMes[m.key] || 0;
+                      return (
+                        <td
+                          key={m.key}
+                          className="px-2 py-1.5 border-r border-border/70 last:border-r-0 text-right align-middle font-medium"
+                          title={`Despesas quitadas em ${m.full}/${ano}`}
+                        >
+                          <span className="text-rose-600 dark:text-rose-400 font-semibold">
+                            {desp > 0 ? `-${desp.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "0,00"}
+                          </span>
+                        </td>
+                      );
+                    })}
+                    <td className="px-2 py-1.5 text-right font-bold text-rose-600 dark:text-rose-400 bg-rose-50/30 dark:bg-rose-950/20 border-l border-border">
+                      -{totalDespesasAno.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+
+                  {/* Linha 3: Faturamento Bruto de Referência */}
+                  <tr className="bg-muted/10 text-[11px] border-t border-border/40 text-muted-foreground">
+                    {MONTHS.map((m) => {
+                      const bruto = activeMonthlyValues[m.key] || 0;
+                      return (
+                        <td
+                          key={m.key}
+                          className="px-2 py-1 border-r border-border/70 last:border-r-0 text-right align-middle"
+                        >
+                          <span className="text-muted-foreground/80">
+                            {bruto.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        </td>
+                      );
+                    })}
+                    <td className="px-2 py-1 text-right font-semibold text-muted-foreground bg-muted/30 border-l border-border">
+                      {totalAno.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+
+                  {/* Linhas de Detalhamento Complementar de Despesas */}
+                  <tr className="bg-muted/25 text-xs text-muted-foreground border-t border-border/60">
+                    <td colSpan={12} className="px-3 py-1.5 font-medium">
+                      <span className="font-bold text-foreground">Composição das Despesas ({ano}):</span> Contas a Pagar (quitadas): <strong className="text-foreground">{brl(totalContasPagarAno)}</strong> | Saídas Avulsas: <strong className="text-foreground">{brl(totalSaidasAvulsasAno)}</strong> | Total Despesas: <strong className="text-rose-600 dark:text-rose-400">{brl(totalDespesasAno)}</strong>
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-500/10">
+                      Margem: {margemLiquidaAno.toFixed(1)}%
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-muted-foreground px-1 gap-2">
+            <span className="flex items-center gap-1.5">
+              <TrendingUp className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+              <span>
+                O <strong>Faturamento Líquido</strong> deduz automaticamente todas as despesas lançadas e pagas (contas a pagar + saídas avulsas) do faturamento bruto mensal.
+              </span>
+            </span>
+            <span>
+              Melhor Mês Líquido: <strong className="text-emerald-600 dark:text-emerald-400">{melhorMesLiquido.nome} ({brl(melhorMesLiquido.valor)})</strong>
+            </span>
+          </div>
+        </div>
+
         {/* ─── GRAFICOS: EVOLUÇÃO ANO A ANO E EVOLUÇÃO MENSAL ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* GRÁFICO 1: EVOLUÇÃO ANO A ANO */}
@@ -1017,10 +1357,10 @@ function FaturamentoGeralPage() {
                 <div>
                   <CardTitle className="text-base font-bold flex items-center gap-2">
                     <BarChart3 className="h-4 w-4 text-sky-500" />
-                    Evolução Ano a Ano
+                    Evolução Ano a Ano (Bruto vs Líquido)
                   </CardTitle>
                   <CardDescription>
-                    Comparativo histórico do faturamento total anual consolidado
+                    Comparativo histórico do faturamento bruto, despesas e resultado líquido consolidado
                   </CardDescription>
                 </div>
                 <div className="px-2.5 py-1 rounded-full text-xs font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400">
@@ -1041,7 +1381,7 @@ function FaturamentoGeralPage() {
                       width={65}
                     />
                     <Tooltip
-                      formatter={(value: any) => [brl(Number(value)), "Faturamento Total"]}
+                      formatter={(value: any, name: any) => [brl(Number(value)), name]}
                       labelFormatter={(label) => `Ano ${label}`}
                       contentStyle={{
                         backgroundColor: "var(--card)",
@@ -1051,31 +1391,15 @@ function FaturamentoGeralPage() {
                       }}
                     />
                     <Legend verticalAlign="top" height={36} />
-                    <Bar dataKey="Total" radius={[6, 6, 0, 0]} name="Total Faturado">
-                      {dadosEvolucaoAnual.map((entry) => (
-                        <Cell
-                          key={`cell-${entry.ano}`}
-                          fill={entry.anoNum === ano ? "#0284c7" : "#7dd3fc"}
-                        />
-                      ))}
-                      <LabelList
-                        dataKey="Total"
-                        position="top"
-                        formatter={(val: any) =>
-                          Number(val) > 0
-                            ? `R$ ${(Number(val) / 1000).toFixed(1)}k`
-                            : ""
-                        }
-                        className="text-[10px] font-bold fill-foreground"
-                      />
-                    </Bar>
+                    <Bar dataKey="Total" radius={[4, 4, 0, 0]} name="Faturamento Bruto" fill="#0284c7" />
+                    <Bar dataKey="Liquido" radius={[4, 4, 0, 0]} name="Faturamento Líquido" fill="#10b981" />
                     <Line
                       type="monotone"
                       dataKey="Total"
                       stroke="#f59e0b"
-                      strokeWidth={2.5}
-                      dot={{ r: 4, fill: "#f59e0b", strokeWidth: 1 }}
-                      name="Evolução Anual"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: "#f59e0b", strokeWidth: 1 }}
+                      name="Tendência Bruta"
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -1101,19 +1425,11 @@ function FaturamentoGeralPage() {
                           <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
                         )}
                       </div>
-                      <div className="font-extrabold text-foreground text-xs my-0.5 truncate">
+                      <div className="font-extrabold text-foreground text-xs my-0.5 truncate" title={`Bruto: ${brl(d.Total)}`}>
                         {brl(d.Total)}
                       </div>
-                      <div
-                        className={`text-[10px] font-bold ${
-                          d.crescimento > 0
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : d.crescimento < 0
-                            ? "text-red-500"
-                            : "text-muted-foreground"
-                        }`}
-                      >
-                        {d.crescimentoLabel}
+                      <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 truncate" title={`Líquido: ${brl(d.Liquido)}`}>
+                        Líq: {brl(d.Liquido)}
                       </div>
                     </button>
                   ))}
@@ -1132,11 +1448,11 @@ function FaturamentoGeralPage() {
                     Evolução Mensal ({ano})
                   </CardTitle>
                   <CardDescription>
-                    Distribuição dos recebimentos mês a mês ao longo do ano de {ano}
+                    Comparativo de Faturamento Bruto vs Despesas e Resultado Líquido em {ano}
                   </CardDescription>
                 </div>
                 <div className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                  Total: {brl(totalAno)}
+                  Líquido: {brl(totalLiquidoAno)}
                 </div>
               </div>
             </CardHeader>
@@ -1166,15 +1482,15 @@ function FaturamentoGeralPage() {
                       }}
                     />
                     <Legend verticalAlign="top" height={36} />
-                    <Bar dataKey="Total" fill="#0ea5e9" radius={[4, 4, 0, 0]} name="Total Faturado" />
+                    <Bar dataKey="Total" fill="#0ea5e9" radius={[4, 4, 0, 0]} name="Faturamento Bruto" />
+                    <Bar dataKey="Despesas" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Despesas" />
                     <Line
                       type="monotone"
-                      dataKey="media"
-                      stroke="#f59e0b"
-                      strokeWidth={2}
-                      strokeDasharray="4 4"
-                      dot={false}
-                      name="Média Mensal"
+                      dataKey="Faturamento Líquido"
+                      stroke="#10b981"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, fill: "#10b981" }}
+                      name="Faturamento Líquido"
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
@@ -1183,10 +1499,10 @@ function FaturamentoGeralPage() {
               {/* Destaques do Ano */}
               <div className="mt-4 pt-3 border-t border-border/60 flex items-center justify-between text-xs text-muted-foreground">
                 <span>
-                  Média Mensal: <strong className="text-foreground">{brl(mediaMensal)}</strong>
+                  Média Líquida: <strong className="text-emerald-600 dark:text-emerald-400">{brl(mediaMensalLiquida)}</strong>/mês
                 </span>
                 <span>
-                  Melhor Mês: <strong className="text-emerald-600 dark:text-emerald-400">{melhorMes.nome} ({brl(melhorMes.valor)})</strong>
+                  Melhor Mês Líquido: <strong className="text-emerald-600 dark:text-emerald-400">{melhorMesLiquido.nome} ({brl(melhorMesLiquido.valor)})</strong>
                 </span>
               </div>
             </CardContent>
@@ -1198,10 +1514,10 @@ function FaturamentoGeralPage() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-bold flex items-center gap-2">
               <Layers className="h-4 w-4 text-sky-500" />
-              Histórico Consolidado de Todos os Anos
+              Histórico Consolidado de Todos os Anos (Bruto, Despesas e Líquido)
             </CardTitle>
             <CardDescription>
-              Tabela comparativa do faturamento acumulado por exercício fiscal e taxas de crescimento
+              Tabela comparativa do faturamento acumulado, despesas e resultado líquido por exercício fiscal
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -1210,11 +1526,12 @@ function FaturamentoGeralPage() {
                 <thead>
                   <tr className="bg-muted/50 text-muted-foreground border-b border-border text-left">
                     <th className="py-2.5 px-3 font-bold">Ano</th>
-                    <th className="py-2.5 px-3 font-bold text-right">Cobranças Pagas</th>
-                    <th className="py-2.5 px-3 font-bold text-right">Outras Entradas</th>
-                    <th className="py-2.5 px-3 font-bold text-right">Total Faturado</th>
-                    <th className="py-2.5 px-3 font-bold text-right">Média Mensal</th>
-                    <th className="py-2.5 px-3 font-bold text-center">Crescimento</th>
+                    <th className="py-2.5 px-3 font-bold text-right">Faturamento Bruto</th>
+                    <th className="py-2.5 px-3 font-bold text-right">Despesas Totais</th>
+                    <th className="py-2.5 px-3 font-bold text-right text-emerald-600 dark:text-emerald-400">Faturamento Líquido</th>
+                    <th className="py-2.5 px-3 font-bold text-right">Média Líquida/Mês</th>
+                    <th className="py-2.5 px-3 font-bold text-center">Margem Líquida</th>
+                    <th className="py-2.5 px-3 font-bold text-center">Crescimento Bruto</th>
                     <th className="py-2.5 px-3 font-bold text-center">Ações</th>
                   </tr>
                 </thead>
@@ -1238,17 +1555,30 @@ function FaturamentoGeralPage() {
                             )}
                           </div>
                         </td>
-                        <td className="py-3 px-3 text-right text-muted-foreground">
-                          {brl(item.Cobranças)}
-                        </td>
-                        <td className="py-3 px-3 text-right text-muted-foreground">
-                          {brl(item["Outras Entradas"])}
-                        </td>
-                        <td className="py-3 px-3 text-right font-extrabold text-foreground text-sm">
+                        <td className="py-3 px-3 text-right font-semibold text-foreground">
                           {brl(item.Total)}
                         </td>
+                        <td className="py-3 px-3 text-right font-medium text-rose-600 dark:text-rose-400">
+                          {brl(item.Despesas)}
+                        </td>
+                        <td className={`py-3 px-3 text-right font-extrabold text-sm ${item.Liquido >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"}`}>
+                          {brl(item.Liquido)}
+                        </td>
                         <td className="py-3 px-3 text-right text-muted-foreground">
-                          {brl(item.Total / 12)}
+                          {brl(item.Liquido / 12)}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
+                              item.Margem > 0
+                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                : item.Margem < 0
+                                ? "bg-red-500/10 text-red-600 dark:text-red-400"
+                                : "bg-muted text-muted-foreground"
+                            }`}
+                          >
+                            {item.Margem.toFixed(1)}%
+                          </span>
                         </td>
                         <td className="py-3 px-3 text-center">
                           <span
@@ -1286,7 +1616,7 @@ function FaturamentoGeralPage() {
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-xl bg-card border border-border/70 text-xs text-muted-foreground">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-sky-500" />
-            <span>Módulo de Faturamento Geral consolidado do Gestor Financeiro Infortec.</span>
+            <span>Módulo de Faturamento Geral e Líquido consolidado do Gestor Financeiro Infortec.</span>
           </div>
           <div className="flex items-center gap-2">
             <Button
@@ -1315,3 +1645,4 @@ function FaturamentoGeralPage() {
     </AppLayout>
   );
 }
+
