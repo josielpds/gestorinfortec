@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Check, Send, Repeat, Pencil, CalendarPlus, CircleSlash, ChevronRight, ChevronDown, Upload, Search, CalendarRange, RotateCcw, TrendingUp, AlertTriangle, Clock } from "lucide-react";
+import { Plus, Trash2, Check, CheckCircle2, Send, Repeat, Pencil, CalendarPlus, CircleSlash, ChevronRight, ChevronDown, Upload, Search, CalendarRange, RotateCcw, TrendingUp, AlertTriangle, Clock } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { brl, fmtDate, effectiveStatus, todayISO } from "@/lib/format";
@@ -41,6 +41,7 @@ function CobrancasPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Cobranca | null>(null);
+  const [baixandoCobranca, setBaixandoCobranca] = useState<Cobranca | null>(null);
   const [gerando, setGerando] = useState<Cobranca | null>(null);
   const [previsaoOpen, setPrevisaoOpen] = useState(false);
   const [filter, setFilter] = useState<string>("aberto");
@@ -319,13 +320,13 @@ function CobrancasPage() {
     onError: (e: any) => toast.error(e.message),
   });
 
-  // Marca a cobrança como paga — atualização otimista imediata + sync com servidor
+  // Marca a cobrança como paga — com data customizável e atualização otimista
   const marcarPago = useMutation({
-    mutationFn: async (id: string) => {
-      const hoje = todayISO();
+    mutationFn: async ({ id, data_pagamento }: { id: string; data_pagamento?: string }) => {
+      const dataPag = data_pagamento || todayISO();
       const { data, error } = await supabase
         .from("cobrancas")
-        .update({ status: "pago", data_pagamento: hoje })
+        .update({ status: "pago", data_pagamento: dataPag })
         .eq("id", id)
         .select("id, status, data_pagamento")
         .single();
@@ -333,21 +334,23 @@ function CobrancasPage() {
       return data;
     },
     // Atualiza o cache local ANTES da resposta do servidor (optimistic update)
-    onMutate: async (id: string) => {
+    onMutate: async ({ id, data_pagamento }) => {
       await qc.cancelQueries({ queryKey: ["cobrancas"] });
       const prev = qc.getQueryData<Cobranca[]>(["cobrancas"]);
+      const dataPag = data_pagamento || todayISO();
       qc.setQueryData<Cobranca[]>(["cobrancas"], (old = []) =>
         old.map((c) =>
-          c.id === id ? { ...c, status: "pago", data_pagamento: todayISO() } : c
+          c.id === id ? { ...c, status: "pago", data_pagamento: dataPag } : c
         )
       );
       return { prev };
     },
     onSuccess: () => {
-      toast.success("Cobrança marcada como paga ✓");
+      toast.success("Recebimento registrado com sucesso ✓");
       qc.invalidateQueries();
+      setBaixandoCobranca(null);
     },
-    onError: (e: any, _id, ctx: any) => {
+    onError: (e: any, _vars, ctx: any) => {
       // Reverte o cache local se o servidor falhar
       if (ctx?.prev) qc.setQueryData(["cobrancas"], ctx.prev);
       toast.error("Erro ao marcar como pago: " + e.message);
@@ -417,7 +420,7 @@ function CobrancasPage() {
         <td className="px-4 py-3">
           <StatusBadge status={st} />
           {c.status === "pago" && c.data_pagamento && (
-            <div className="text-xs text-muted-foreground mt-0.5">em {fmtDate(c.data_pagamento)}</div>
+            <div className="text-xs text-muted-foreground mt-0.5 font-medium">Recebido em: {fmtDate(c.data_pagamento)}</div>
           )}
         </td>
         <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -430,7 +433,7 @@ function CobrancasPage() {
                 });
                 window.open(waLink(c.clientes?.telefone ?? "", msg), "_blank");
               }}><Send className="h-4 w-4 text-primary" /></Button>
-              <Button size="sm" variant="ghost" title="Dar baixa (marcar como pago)" onClick={() => marcarPago.mutate(c.id)}>
+              <Button size="sm" variant="ghost" title="Dar baixa (registrar recebimento com data)" onClick={() => setBaixandoCobranca(c)}>
                 <Check className="h-4 w-4 text-success" />
               </Button>
               <Button size="sm" variant="ghost" title="Editar" onClick={() => setEditing(c)}>
@@ -769,8 +772,8 @@ function CobrancasPage() {
                             {proxima && proxima.status !== "pago" && (
                               <Button
                                 size="sm" variant="ghost"
-                                title="Dar baixa na próxima cobrança"
-                                onClick={() => marcarPago.mutate(proxima.id)}
+                                title="Dar baixa na próxima cobrança com data real"
+                                onClick={() => setBaixandoCobranca(proxima)}
                                 disabled={marcarPago.isPending}
                               >
                                 <Check className="h-4 w-4 text-success" />
@@ -809,7 +812,6 @@ function CobrancasPage() {
         </Card>
       </div>
 
-
       <Dialog open={!!editing} onOpenChange={(v) => !v && setEditing(null)}>
         {editing && (
           <CobrancaForm
@@ -818,6 +820,18 @@ function CobrancasPage() {
             initial={editing}
             loading={update.isPending}
             onSubmit={(p) => update.mutate({ id: editing.id, ...p })}
+          />
+        )}
+      </Dialog>
+
+      {/* Modal de Baixa com Data Real do Recebimento */}
+      <Dialog open={!!baixandoCobranca} onOpenChange={(v) => !v && setBaixandoCobranca(null)}>
+        {baixandoCobranca && (
+          <BaixarCobrancaDialog
+            cobranca={baixandoCobranca}
+            loading={marcarPago.isPending}
+            onConfirm={(data_pagamento) => marcarPago.mutate({ id: baixandoCobranca.id, data_pagamento })}
+            onCancel={() => setBaixandoCobranca(null)}
           />
         )}
       </Dialog>
@@ -832,6 +846,102 @@ function CobrancasPage() {
         )}
       </Dialog>
     </AppLayout>
+  );
+}
+
+function BaixarCobrancaDialog({
+  cobranca,
+  loading,
+  onConfirm,
+  onCancel,
+}: {
+  cobranca: Cobranca;
+  loading: boolean;
+  onConfirm: (data_pagamento: string) => void;
+  onCancel: () => void;
+}) {
+  const [dataRecebimento, setDataRecebimento] = useState<string>(() => todayISO());
+
+  return (
+    <DialogContent className="sm:max-w-[440px]">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2 text-foreground">
+          <CheckCircle2 className="h-5 w-5 text-success" />
+          Registrar Recebimento de Cobrança
+        </DialogTitle>
+      </DialogHeader>
+
+      <div className="space-y-4 py-2">
+        <div className="bg-muted/40 p-3 rounded-lg border border-border/60 text-xs space-y-1.5">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Cliente:</span>
+            <strong className="text-foreground text-right">{cobranca.clientes?.nome || "—"}</strong>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Descrição:</span>
+            <span className="text-foreground text-right">{cobranca.descricao}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Valor:</span>
+            <strong className="text-foreground text-right text-sm">{brl(cobranca.valor)}</strong>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Vencimento original:</span>
+            <span className="text-muted-foreground text-right">{fmtDate(cobranca.vencimento)}</span>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="data-recebimento-cobranca" className="text-sm font-semibold">
+            Data Real em que o Cliente Pagou *
+          </Label>
+          <Input
+            id="data-recebimento-cobranca"
+            type="date"
+            value={dataRecebimento}
+            onChange={(e) => setDataRecebimento(e.target.value)}
+            className="w-full text-sm font-medium"
+            required
+          />
+          <div className="flex items-center gap-2 pt-1 text-xs">
+            <span className="text-muted-foreground">Atalhos rápidos:</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => setDataRecebimento(todayISO())}
+            >
+              Hoje
+            </Button>
+            {cobranca.vencimento && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setDataRecebimento(cobranca.vencimento)}
+              >
+                No Vencimento
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <DialogFooter className="gap-2 sm:gap-0 pt-2">
+        <Button variant="outline" onClick={onCancel} disabled={loading}>
+          Cancelar
+        </Button>
+        <Button
+          onClick={() => onConfirm(dataRecebimento)}
+          disabled={loading || !dataRecebimento}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+        >
+          {loading ? "Registrando..." : "Confirmar Recebimento"}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
   );
 }
 
@@ -900,6 +1010,8 @@ function CobrancaForm({
     vencimento: initial?.vencimento ?? todayISO(),
     observacoes: initial?.observacoes ?? "",
     categoria_id: initial?.categoria_id ?? "",
+    status: initial?.status ?? "pendente",
+    data_pagamento: initial?.data_pagamento ?? todayISO(),
     recorrente: initial?.recorrente ?? false,
     frequencia: initial?.frequencia ?? "mensal",
     recorrencia_fim: initial?.recorrencia_fim ?? "",
@@ -968,6 +1080,40 @@ function CobrancaForm({
             <Input type="date" value={form.vencimento} onChange={(e) => setForm({ ...form, vencimento: e.target.value })} />
           </div>
         </div>
+
+        {initial && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Situação / Status</Label>
+              <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pendente">Pendente</SelectItem>
+                  <SelectItem value="pago">Pago (Recebido)</SelectItem>
+                  <SelectItem value="atrasado">Atrasado</SelectItem>
+                  <SelectItem value="cancelado">Cancelado</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
+
+        {form.status === "pago" && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg space-y-1.5">
+            <Label className="text-emerald-800 dark:text-emerald-300 font-semibold text-xs">
+              Data em que o Cliente Realizou o Pagamento *
+            </Label>
+            <Input
+              type="date"
+              value={form.data_pagamento}
+              onChange={(e) => setForm({ ...form, data_pagamento: e.target.value })}
+              required
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Define em qual mês/dia esse recebimento será contabilizado no faturamento do sistema.
+            </p>
+          </div>
+        )}
 
         <div className="rounded-lg border p-3 space-y-3 bg-muted/20">
           <div className="flex items-center justify-between">
@@ -1054,6 +1200,8 @@ function CobrancaForm({
               recorrencia_fim: fim,
               recorrencia_qtd: form.recorrencia_qtd,
               gerar_antecipadas: form.gerar_antecipadas,
+              status: form.status,
+              data_pagamento: form.status === "pago" ? form.data_pagamento : null,
             });
           }}
         >

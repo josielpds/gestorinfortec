@@ -45,6 +45,7 @@ function ContasPagarPage() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Conta | null>(null);
+  const [baixandoConta, setBaixandoConta] = useState<Conta | null>(null);
   const [filtro, setFiltro] = useState<"todos" | "pendente" | "atrasado" | "pago">("todos");
   const [mesFilter, setMesFilter] = useState<string>(hoje().slice(0, 7));
 
@@ -86,14 +87,19 @@ function ContasPagarPage() {
   });
 
   const setStatus = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: Conta["status"] }) => {
+    mutationFn: async ({ id, status, pago_em }: { id: string; status: Conta["status"]; pago_em?: string | null }) => {
+      const dataPag = status === "pago" ? (pago_em || hoje()) : null;
       const { error } = await supabase
         .from("contas_pagar")
-        .update({ status, pago_em: status === "pago" ? hoje() : null })
+        .update({ status, pago_em: dataPag })
         .eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => { toast.success("Status atualizado"); qc.invalidateQueries({ queryKey: ["contas_pagar"] }); },
+    onSuccess: () => {
+      toast.success("Status atualizado");
+      qc.invalidateQueries({ queryKey: ["contas_pagar"] });
+      setBaixandoConta(null);
+    },
     onError: (e: any) => toast.error(e.message),
   });
 
@@ -318,7 +324,7 @@ function ContasPagarPage() {
                             <RotateCcw className="h-4 w-4 text-warning-foreground" />
                           </Button>
                         ) : (
-                          <Button size="sm" variant="ghost" title="Dar baixa (marcar como pago)" onClick={() => setStatus.mutate({ id: c.id, status: "pago" })}>
+                          <Button size="sm" variant="ghost" title="Dar baixa (marcar como pago com data)" onClick={() => setBaixandoConta(c)}>
                             <CheckCircle2 className="h-4 w-4 text-success" />
                           </Button>
                         )}
@@ -347,7 +353,117 @@ function ContasPagarPage() {
           />
         )}
       </Dialog>
+
+      {/* Modal de Dar Baixa com Seleção de Data Real do Pagamento */}
+      <Dialog open={!!baixandoConta} onOpenChange={(o) => !o && setBaixandoConta(null)}>
+        {baixandoConta && (
+          <BaixarContaDialog
+            conta={baixandoConta}
+            loading={setStatus.isPending}
+            onConfirm={(pago_em) => setStatus.mutate({ id: baixandoConta.id, status: "pago", pago_em })}
+            onCancel={() => setBaixandoConta(null)}
+          />
+        )}
+      </Dialog>
     </AppLayout>
+  );
+}
+
+function BaixarContaDialog({
+  conta,
+  loading,
+  onConfirm,
+  onCancel,
+}: {
+  conta: Conta;
+  loading: boolean;
+  onConfirm: (pago_em: string) => void;
+  onCancel: () => void;
+}) {
+  const [dataPagamento, setDataPagamento] = useState<string>(() => hoje());
+
+  return (
+    <DialogContent className="sm:max-w-[440px]">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2 text-foreground">
+          <CheckCircle2 className="h-5 w-5 text-success" />
+          Registrar Pagamento de Despesa
+        </DialogTitle>
+      </DialogHeader>
+
+      <div className="space-y-4 py-2">
+        <div className="bg-muted/40 p-3 rounded-lg border border-border/60 text-xs space-y-1.5">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Descrição:</span>
+            <strong className="text-foreground text-right">{conta.descricao}</strong>
+          </div>
+          {conta.fornecedor && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Fornecedor:</span>
+              <span className="text-foreground text-right">{conta.fornecedor}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Valor:</span>
+            <strong className="text-foreground text-right text-sm">{brl(conta.valor)}</strong>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Vencimento:</span>
+            <span className="text-muted-foreground text-right">{fmtDate(conta.vencimento)}</span>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="data-pagamento-conta" className="text-sm font-semibold">
+            Data Real do Pagamento *
+          </Label>
+          <Input
+            id="data-pagamento-conta"
+            type="date"
+            value={dataPagamento}
+            onChange={(e) => setDataPagamento(e.target.value)}
+            className="w-full text-sm font-medium"
+            required
+          />
+          <div className="flex items-center gap-2 pt-1 text-xs">
+            <span className="text-muted-foreground">Atalhos rápidos:</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => setDataPagamento(hoje())}
+            >
+              Hoje
+            </Button>
+            {conta.vencimento && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                onClick={() => setDataPagamento(conta.vencimento)}
+              >
+                No Vencimento
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <DialogFooter className="gap-2 sm:gap-0 pt-2">
+        <Button variant="outline" onClick={onCancel} disabled={loading}>
+          Cancelar
+        </Button>
+        <Button
+          onClick={() => onConfirm(dataPagamento)}
+          disabled={loading || !dataPagamento}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+        >
+          {loading ? "Registrando..." : "Confirmar Pagamento"}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
   );
 }
 
@@ -371,6 +487,8 @@ function ContaForm({
     vencimento: initial?.vencimento ?? todayISO(),
     categoria: initial?.categoria ?? "",
     observacoes: initial?.observacoes ?? "",
+    status: initial?.status ?? "pendente",
+    pago_em: initial?.pago_em ?? todayISO(),
   });
   const catsSaida = categorias.filter((c) => c.tipo === "saida");
   return (
@@ -385,15 +503,46 @@ function ContaForm({
           <div><Label>Valor (R$) *</Label><Input type="number" step="0.01" min="0" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} /></div>
           <div><Label>Vencimento *</Label><Input type="date" value={form.vencimento} onChange={(e) => setForm({ ...form, vencimento: e.target.value })} /></div>
         </div>
-        <div>
-          <Label>Categoria</Label>
-          <Select value={form.categoria} onValueChange={(v) => setForm({ ...form, categoria: v })}>
-            <SelectTrigger><SelectValue placeholder="Selecione (opcional)" /></SelectTrigger>
-            <SelectContent>
-              {catsSaida.map((c: any) => <SelectItem key={c.id} value={c.nome}>{c.nome}</SelectItem>)}
-            </SelectContent>
-          </Select>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Categoria</Label>
+            <Select value={form.categoria} onValueChange={(v) => setForm({ ...form, categoria: v })}>
+              <SelectTrigger><SelectValue placeholder="Selecione (opcional)" /></SelectTrigger>
+              <SelectContent>
+                {catsSaida.map((c: any) => <SelectItem key={c.id} value={c.nome}>{c.nome}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>Status</Label>
+            <Select value={form.status} onValueChange={(v: Conta["status"]) => setForm({ ...form, status: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pendente">Pendente</SelectItem>
+                <SelectItem value="pago">Pago (Quitado)</SelectItem>
+                <SelectItem value="cancelado">Cancelado</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
+
+        {form.status === "pago" && (
+          <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg space-y-1.5">
+            <Label className="text-emerald-800 dark:text-emerald-300 font-semibold text-xs">
+              Data em que a Despesa foi Paga *
+            </Label>
+            <Input
+              type="date"
+              value={form.pago_em}
+              onChange={(e) => setForm({ ...form, pago_em: e.target.value })}
+              required
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Define em qual mês/dia essa despesa será contabilizada no faturamento líquido e relatórios.
+            </p>
+          </div>
+        )}
+
         <div><Label>Observações</Label><Textarea rows={2} value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} maxLength={500} /></div>
       </div>
       <DialogFooter>
@@ -406,7 +555,8 @@ function ContaForm({
             vencimento: form.vencimento,
             categoria: form.categoria || null,
             observacoes: form.observacoes || null,
-            ...(initial ? {} : { status: "pendente" }),
+            status: form.status,
+            pago_em: form.status === "pago" ? form.pago_em : null,
           })}
         >
           {loading ? "Salvando..." : submitLabel}
